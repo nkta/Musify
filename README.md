@@ -25,6 +25,7 @@ Unlock the full potential of music: Stream effortlessly with one app!
 
 <center>
 
+Play audio directly from a YouTube URL <br/>
 Online song search with suggestions <br/>
 Offline listening support <br/>
 Import & export your data and never lose it <br/>

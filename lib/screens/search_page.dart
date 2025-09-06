@@ -1,24 +1,3 @@
-/*
- *     Copyright (C) 2025 Valeri Gokadze
- *
- *     Musify is free software: you can redistribute it and/or modify
- *     it under the terms of the GNU General Public License as published by
- *     the Free Software Foundation, either version 3 of the License, or
- *     (at your option) any later version.
- *
- *     Musify is distributed in the hope that it will be useful,
- *     but WITHOUT ANY WARRANTY; without even the implied warranty of
- *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *     GNU General Public License for more details.
- *
- *     You should have received a copy of the GNU General Public License
- *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
- *
- *
- *     For more information about Musify, including how to contribute,
- *     please visit: https://github.com/gokadzev/Musify
- */
-
 import 'dart:async';
 
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
@@ -28,7 +7,10 @@ import 'package:musify/API/musify.dart';
 import 'package:musify/extensions/l10n.dart';
 import 'package:musify/main.dart';
 import 'package:musify/services/data_manager.dart';
+import 'package:musify/services/proxy_manager.dart';
 import 'package:musify/utilities/common_variables.dart';
+import 'package:musify/utilities/flutter_toast.dart';
+import 'package:musify/utilities/formatter.dart';
 import 'package:musify/utilities/utils.dart';
 import 'package:musify/widgets/confirmation_dialog.dart';
 import 'package:musify/widgets/custom_bar.dart';
@@ -36,6 +18,7 @@ import 'package:musify/widgets/custom_search_bar.dart';
 import 'package:musify/widgets/playlist_bar.dart';
 import 'package:musify/widgets/section_title.dart';
 import 'package:musify/widgets/song_bar.dart';
+import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 class SearchPage extends StatefulWidget {
   const SearchPage({super.key});
@@ -74,18 +57,54 @@ class _SearchPageState extends State<SearchPage> {
     super.dispose();
   }
 
+  void _clearSearch() {
+    _searchBar.clear();
+    _songsSearchResult = [];
+    _albumsSearchResult = [];
+    _playlistsSearchResult = [];
+    _suggestionsList = [];
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
   Future<void> search() async {
     final query = _searchBar.text;
 
     if (query.isEmpty) {
-      _songsSearchResult = [];
-      _albumsSearchResult = [];
-      _playlistsSearchResult = [];
-      _suggestionsList = [];
-      if (mounted) setState(() {});
+      _clearSearch();
       return;
     }
     _fetchingSongs.value = true;
+
+    final youtubeUrlRegex = RegExp(
+      r'(?:https?:\/\/)?(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})',
+    );
+    final match = youtubeUrlRegex.firstMatch(query);
+
+    if (match != null) {
+      final videoId = match.group(1);
+      if (videoId != null) {
+        try {
+          final yt = ProxyManager().getClientSync();
+          final video = await yt.videos.get(videoId);
+          final song = returnSongLayout(0, video);
+          audioHandler.playSong(song);
+          _clearSearch();
+        } catch (e, stackTrace) {
+          logger.log('Error while playing YouTube URL', e, stackTrace);
+          if (mounted) {
+            showToast(context, context.l10n!.error);
+          }
+        } finally {
+          _fetchingSongs.value = false;
+          if (mounted) {
+            setState(() {});
+          }
+        }
+        return;
+      }
+    }
 
     if (!searchHistory.contains(query)) {
       final updatedHistory = List.from(searchHistory)..insert(0, query);
@@ -104,7 +123,9 @@ class _SearchPageState extends State<SearchPage> {
       logger.log('Error while searching online songs', e, stackTrace);
     } finally {
       _fetchingSongs.value = false;
-      if (mounted) setState(() {});
+      if (mounted) {
+        setState(() {});
+      }
     }
   }
 
