@@ -21,7 +21,9 @@ import 'package:musify/widgets/song_bar.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 class SearchPage extends StatefulWidget {
-  const SearchPage({super.key});
+  const SearchPage({super.key, this.query});
+
+  final String? query;
 
   @override
   _SearchPageState createState() => _SearchPageState();
@@ -48,6 +50,15 @@ class _SearchPageState extends State<SearchPage> {
   List<dynamic> _playlistsSearchResult = [];
   List<String> _suggestionsList = [];
   Timer? _debounce;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.query != null) {
+      _searchBar.text = widget.query!;
+      search();
+    }
+  }
 
   @override
   void dispose() {
