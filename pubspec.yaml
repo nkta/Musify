@@ -33,6 +33,7 @@ dependencies:
   just_audio: 0.10.4
   path_provider: ^2.1.5
   rxdart: ^0.28.0
+  receive_sharing_intent: ^1.4.5
   url_launcher: ^6.3.2
   youtube_explode_dart: ^2.5.2
 
