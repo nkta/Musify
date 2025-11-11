@@ -46,24 +46,27 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  StreamSubscription? _intentDataStreamSubscription;
+  StreamSubscription<List<SharedMediaFile>>? _intentDataStreamSubscription;
 
   @override
   void initState() {
     super.initState();
-    // For sharing or opening urls/text coming from outside the app while the app is in the memory
-    _intentDataStreamSubscription = ReceiveSharingIntent.getTextStream().listen((String value) {
-      handleSharedText(value);
-    }, onError: (err) {
-      print("getLinkStream error: $err");
-    });
+    final sharingIntent = ReceiveSharingIntent.instance;
 
-    // For sharing or opening urls/text coming from outside the app while the app is closed
-    ReceiveSharingIntent.getInitialText().then((String? value) {
-      if (value != null) {
-        handleSharedText(value);
-      }
-    });
+    // Handle shares delivered while the app is running
+    _intentDataStreamSubscription = sharingIntent.getMediaStream().listen(
+      _handleSharedMedia,
+      onError: (error, stackTrace) {
+        logger.log('receive_sharing_intent stream error', error, stackTrace);
+      },
+    );
+
+    // Handle shares that opened the app
+    sharingIntent.getInitialMedia().then(_handleSharedMedia).catchError(
+      (error, stackTrace) {
+        logger.log('receive_sharing_intent initial media error', error, stackTrace);
+      },
+    );
   }
 
   @override
@@ -73,12 +76,43 @@ class _HomePageState extends State<HomePage> {
   }
 
   void handleSharedText(String sharedText) {
+    if (!mounted) return;
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => SearchPage(query: sharedText),
       ),
     );
+  }
+
+  void _handleSharedMedia(List<SharedMediaFile> mediaFiles) {
+    if (!mounted || mediaFiles.isEmpty) return;
+
+    final shared = _extractSharedText(mediaFiles);
+    if (shared == null) return;
+
+    final message = shared.message?.trim();
+    final pathText = shared.path.trim();
+    final sharedText = (message != null && message.isNotEmpty)
+        ? message
+        : pathText;
+
+    if (sharedText.isEmpty) return;
+
+    unawaited(ReceiveSharingIntent.instance.reset());
+    handleSharedText(sharedText);
+  }
+
+  SharedMediaFile? _extractSharedText(List<SharedMediaFile> mediaFiles) {
+    for (final media in mediaFiles) {
+      final isTextType = media.type == SharedMediaType.text ||
+          media.type == SharedMediaType.url;
+      final isTextMime = media.mimeType?.startsWith('text/') ?? false;
+      if (isTextType || isTextMime) {
+        return media;
+      }
+    }
+    return null;
   }
 
   @override

@@ -6,6 +6,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:musify/API/musify.dart';
 import 'package:musify/extensions/l10n.dart';
 import 'package:musify/main.dart';
+import 'package:musify/screens/playlist_page.dart';
 import 'package:musify/services/data_manager.dart';
 import 'package:musify/services/proxy_manager.dart';
 import 'package:musify/utilities/common_variables.dart';
@@ -18,7 +19,6 @@ import 'package:musify/widgets/custom_search_bar.dart';
 import 'package:musify/widgets/playlist_bar.dart';
 import 'package:musify/widgets/section_title.dart';
 import 'package:musify/widgets/song_bar.dart';
-import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 class SearchPage extends StatefulWidget {
   const SearchPage({super.key, this.query});
@@ -88,19 +88,22 @@ class _SearchPageState extends State<SearchPage> {
     }
     _fetchingSongs.value = true;
 
-    final youtubeUrlRegex = RegExp(
+    final youtubeVideoUrlRegex = RegExp(
       r'(?:https?:\/\/)?(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})',
     );
-    final match = youtubeUrlRegex.firstMatch(query);
+    final youtubePlaylistUrlRegex = RegExp(
+      r'(?:https?:\/\/)?(?:www\.)?youtube\.com\/playlist\?list=([a-zA-Z0-9_-]+)',
+    );
 
-    if (match != null) {
-      final videoId = match.group(1);
+    final videoMatch = youtubeVideoUrlRegex.firstMatch(query);
+    if (videoMatch != null) {
+      final videoId = videoMatch.group(1);
       if (videoId != null) {
         try {
           final yt = ProxyManager().getClientSync();
           final video = await yt.videos.get(videoId);
           final song = returnSongLayout(0, video);
-          audioHandler.playSong(song);
+          await audioHandler.playSong(song);
           _clearSearch();
         } catch (e, stackTrace) {
           logger.log('Error while playing YouTube URL', e, stackTrace);
@@ -113,6 +116,24 @@ class _SearchPageState extends State<SearchPage> {
             setState(() {});
           }
         }
+        return;
+      }
+    }
+
+    final playlistMatch = youtubePlaylistUrlRegex.firstMatch(query);
+    if (playlistMatch != null) {
+      final playlistId = playlistMatch.group(1);
+      if (playlistId != null) {
+        unawaited(
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => PlaylistPage(playlistId: playlistId),
+            ),
+          ),
+        );
+        _clearSearch();
+        _fetchingSongs.value = false;
         return;
       }
     }

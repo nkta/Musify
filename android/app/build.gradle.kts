@@ -22,6 +22,9 @@ if (keystorePropertiesFile.exists()) {
         keystoreProperties.load(inputStream)
     }
 }
+val releaseKeystoreFile = file("key.jks")
+val hasReleaseKeystore = releaseKeystoreFile.exists() &&
+    keystoreProperties.isNotEmpty()
 
 android {
     namespace = "com.gokadzev.musify"
@@ -68,13 +71,12 @@ android {
 
     signingConfigs {
         create("release") {
-            // From decoded key
-            storeFile = file("key.jks")
-
-            // From key.properties
-            keyAlias = keystoreProperties["keyAlias"] as String?
-            keyPassword = keystoreProperties["keyPassword"] as String?
-            storePassword = keystoreProperties["storePassword"] as String?
+            if (hasReleaseKeystore) {
+                storeFile = releaseKeystoreFile
+                keyAlias = keystoreProperties["keyAlias"] as String?
+                keyPassword = keystoreProperties["keyPassword"] as String?
+                storePassword = keystoreProperties["storePassword"] as String?
+            }
         }
     }
 
@@ -91,7 +93,11 @@ android {
 
     buildTypes {
         getByName("release") {
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = if (hasReleaseKeystore) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             isShrinkResources = false
         }
         getByName("debug") {

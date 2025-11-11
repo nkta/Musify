@@ -142,10 +142,10 @@ class _SongBarState extends State<SongBar> {
       return;
     }
 
-    audioHandler.playSong(widget.song);
-    if (audioHandler.queue.hasValue && widget.clearPlaylist) {
-      audioHandler.clearQueue();
-    }
+    audioHandler.playSong(
+      widget.song,
+      resetQueue: widget.clearPlaylist,
+    );
   }
 
   Widget _buildAlbumArt(Color primaryColor) {
