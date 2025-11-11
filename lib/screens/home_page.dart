@@ -36,7 +36,7 @@ import 'package:musify/widgets/playlist_cube.dart';
 import 'package:musify/widgets/section_header.dart';
 import 'package:musify/widgets/song_bar.dart';
 import 'package:musify/widgets/spinner.dart';
-import 'package:receive_sharing_intent/receive_sharing_intent.dart';
+import 'package:flutter_share_receiver/flutter_share_receiver.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -64,7 +64,11 @@ class _HomePageState extends State<HomePage> {
     // Handle shares that opened the app
     sharingIntent.getInitialMedia().then(_handleSharedMedia).catchError(
       (error, stackTrace) {
-        logger.log('receive_sharing_intent initial media error', error, stackTrace);
+        logger.log(
+          'receive_sharing_intent initial media error',
+          error,
+          stackTrace,
+        );
       },
     );
   }

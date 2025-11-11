@@ -110,3 +110,8 @@ android {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    implementation("androidx.media:media:1.7.0")
+    implementation(platform("org.jetbrains.kotlin:kotlin-bom:1.9.0"))
+}
