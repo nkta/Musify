@@ -21,6 +21,7 @@
 
 import 'dart:math';
 
+import 'package:audio_service/audio_service.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -262,12 +263,15 @@ class _PlaylistPageState extends State<PlaylistPage> {
   }
 
   Widget buildPlaylistHeader() {
-    final _songsLength = _playlist['list'].length;
+    final songsLength = (_playlist['list'] as List<dynamic>).length;
 
-    return PlaylistHeader(
-      _buildPlaylistImage(),
-      _playlist['title'],
-      _songsLength,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        PlaylistHeader(_buildPlaylistImage(), _playlist['title'], songsLength),
+        const SizedBox(height: 16),
+        _buildHeaderActions(),
+      ],
     );
   }
 
@@ -643,5 +647,131 @@ class _PlaylistPageState extends State<PlaylistPage> {
       },
       borderRadius: borderRadius,
     );
+  }
+
+  Future<void> _handlePlayPlaylist() async {
+    if (_playlist == null) return;
+    final songs = _playlist['list'] as List<dynamic>?;
+    if (songs == null || songs.isEmpty) return;
+
+    final shouldShuffle = shuffleNotifier.value;
+    final startIndex = shouldShuffle && songs.length > 1
+        ? Random().nextInt(songs.length)
+        : 0;
+
+    await audioHandler.playPlaylistSong(
+      playlist: _playlist,
+      songIndex: startIndex,
+    );
+
+    if (shouldShuffle) {
+      await audioHandler.setShuffleMode(AudioServiceShuffleMode.all);
+    }
+  }
+
+  Widget _buildHeaderActions() {
+    final localization = context.l10n!;
+
+    return Row(
+      children: [
+        Expanded(child: _buildPlayPauseButton()),
+        const SizedBox(width: 12),
+        Expanded(
+          child: ValueListenableBuilder<bool>(
+            valueListenable: shuffleNotifier,
+            builder: (_, isShuffled, __) {
+              return isShuffled
+                  ? FilledButton.icon(
+                      onPressed: () => audioHandler.setShuffleMode(
+                        AudioServiceShuffleMode.none,
+                      ),
+                      icon: const Icon(FluentIcons.arrow_shuffle_24_filled),
+                      label: Text(localization.shuffle),
+                    )
+                  : FilledButton.tonalIcon(
+                      onPressed: () => audioHandler.setShuffleMode(
+                        AudioServiceShuffleMode.all,
+                      ),
+                      icon: const Icon(FluentIcons.arrow_shuffle_off_24_filled),
+                      label: Text(localization.shuffle),
+                    );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPlayPauseButton() {
+    final localization = context.l10n!;
+    final playlistSongs = (_playlist['list'] as List<dynamic>);
+    final hasSongs = playlistSongs.isNotEmpty;
+
+    return StreamBuilder<PlaybackState>(
+      stream: audioHandler.playbackStateStream,
+      builder: (context, snapshot) {
+        final playbackState = snapshot.data;
+        final processingState = playbackState?.processingState;
+        final isPlaying = playbackState?.playing ?? false;
+        final isBuffering =
+            processingState == AudioProcessingState.loading ||
+            processingState == AudioProcessingState.buffering;
+        final isCompleted = processingState == AudioProcessingState.completed;
+        final isCurrentFromPlaylist = _isCurrentSongFromPlaylist();
+
+        IconData iconData = FluentIcons.play_circle_24_filled;
+        String label = localization.play;
+        VoidCallback? onPressed = hasSongs ? () => _handlePlayPlaylist() : null;
+        Widget? iconWidget;
+
+        if (!hasSongs) {
+          onPressed = null;
+        } else if (isCurrentFromPlaylist) {
+          iconData = isPlaying
+              ? FluentIcons.pause_24_filled
+              : FluentIcons.play_24_filled;
+          label = isPlaying ? localization.pause : localization.play;
+
+          if (isBuffering) {
+            iconWidget = SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation<Color>(
+                  Theme.of(context).colorScheme.onPrimary,
+                ),
+              ),
+            );
+            onPressed = null;
+          } else if (isPlaying) {
+            onPressed = audioHandler.pause;
+          } else if (isCompleted) {
+            onPressed = audioHandler.playAgain;
+          } else {
+            onPressed = audioHandler.play;
+          }
+        }
+
+        return FilledButton.icon(
+          onPressed: onPressed,
+          icon: iconWidget ?? Icon(iconData),
+          label: Text(label),
+        );
+      },
+    );
+  }
+
+  bool _isCurrentSongFromPlaylist() {
+    if (_playlist == null || _playlist['list'] == null) return false;
+
+    final currentSong = audioHandler.currentSong;
+    if (currentSong == null) return false;
+
+    final currentId = currentSong['ytid']?.toString();
+    if (currentId == null) return false;
+
+    final playlistSongs = (_playlist['list'] as List<dynamic>);
+    return playlistSongs.any((song) => song['ytid']?.toString() == currentId);
   }
 }
