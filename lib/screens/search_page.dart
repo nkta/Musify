@@ -34,6 +34,8 @@ final ValueNotifier<List> searchHistoryNotifier = ValueNotifier<List>(
   Hive.box('user').get('searchHistory', defaultValue: []),
 );
 
+enum SearchResultFilter { songs, playlists }
+
 // Backward compatibility - keep the global variable for existing code
 List get searchHistory => searchHistoryNotifier.value;
 set searchHistory(List value) {
@@ -44,6 +46,10 @@ class _SearchPageState extends State<SearchPage> {
   final TextEditingController _searchBar = TextEditingController();
   final FocusNode _inputNode = FocusNode();
   final ValueNotifier<bool> _fetchingSongs = ValueNotifier(false);
+  final Set<SearchResultFilter> _activeFilters = {
+    SearchResultFilter.songs,
+    SearchResultFilter.playlists,
+  };
   int maxSongsInList = 15;
   List<dynamic> _songsSearchResult = [];
   List<dynamic> _albumsSearchResult = [];
@@ -164,6 +170,14 @@ class _SearchPageState extends State<SearchPage> {
   @override
   Widget build(BuildContext context) {
     final primaryColor = Theme.of(context).colorScheme.primary;
+    final showSongs = _activeFilters.contains(SearchResultFilter.songs);
+    final showPlaylists = _activeFilters.contains(SearchResultFilter.playlists);
+    final hasSongsResults = showSongs && _songsSearchResult.isNotEmpty;
+    final hasAlbumResults = showPlaylists && _albumsSearchResult.isNotEmpty;
+    final hasPlaylistResults = showPlaylists && _playlistsSearchResult.isNotEmpty;
+    final hasAnyResults =
+        hasSongsResults || hasAlbumResults || hasPlaylistResults;
+
     return Scaffold(
       appBar: AppBar(title: Text(context.l10n!.search)),
       body: SingleChildScrollView(
@@ -194,11 +208,41 @@ class _SearchPageState extends State<SearchPage> {
                 _inputNode.unfocus();
               },
             ),
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Wrap(
+                spacing: 8,
+                children: SearchResultFilter.values.map((filter) {
+                  final isSelected = _activeFilters.contains(filter);
+                  return FilterChip(
+                    label: Text(_filterLabelFor(context, filter)),
+                    selected: isSelected,
+                    onSelected: (selected) {
+                      setState(() {
+                        if (selected) {
+                          _activeFilters.add(filter);
+                        } else if (_activeFilters.length > 1) {
+                          _activeFilters.remove(filter);
+                        }
+                      });
+                    },
+                  );
+                }).toList(),
+              ),
+            ),
+            const SizedBox(height: 12),
 
             AnimatedSwitcher(
               duration: const Duration(milliseconds: 200),
-              child: (_songsSearchResult.isEmpty && _albumsSearchResult.isEmpty)
-                  ? ValueListenableBuilder<List>(
+              child: hasAnyResults
+                  ? _buildSearchResults(
+                      context,
+                      primaryColor,
+                      showSongs: showSongs,
+                      showPlaylists: showPlaylists,
+                    )
+                  : ValueListenableBuilder<List>(
                       valueListenable: searchHistoryNotifier,
                       builder: (context, searchHistory, _) {
                         final items = _suggestionsList.isEmpty
@@ -254,8 +298,7 @@ class _SearchPageState extends State<SearchPage> {
                           ],
                         );
                       },
-                    )
-                  : _buildSearchResults(context, primaryColor),
+                    ),
             ),
           ],
         ),
@@ -263,11 +306,16 @@ class _SearchPageState extends State<SearchPage> {
     );
   }
 
-  Widget _buildSearchResults(BuildContext context, Color primaryColor) {
+  Widget _buildSearchResults(
+    BuildContext context,
+    Color primaryColor, {
+    required bool showSongs,
+    required bool showPlaylists,
+  }) {
     final widgets = <Widget>[];
 
     // Songs section
-    if (_songsSearchResult.isNotEmpty) {
+    if (showSongs && _songsSearchResult.isNotEmpty) {
       widgets.add(SectionTitle(context.l10n!.songs, primaryColor));
 
       final songsCount = _songsSearchResult.length > maxSongsInList
@@ -289,7 +337,7 @@ class _SearchPageState extends State<SearchPage> {
     }
 
     // Albums section
-    if (_albumsSearchResult.isNotEmpty) {
+    if (showPlaylists && _albumsSearchResult.isNotEmpty) {
       widgets.add(SectionTitle(context.l10n!.albums, primaryColor));
 
       final albumsCount = _albumsSearchResult.length > maxSongsInList
@@ -315,7 +363,7 @@ class _SearchPageState extends State<SearchPage> {
     }
 
     // Playlists section
-    if (_playlistsSearchResult.isNotEmpty) {
+    if (showPlaylists && _playlistsSearchResult.isNotEmpty) {
       widgets.add(SectionTitle(context.l10n!.playlists, primaryColor));
 
       final playlistsCount = _playlistsSearchResult.length > maxSongsInList
@@ -347,6 +395,15 @@ class _SearchPageState extends State<SearchPage> {
       ),
       children: widgets,
     );
+  }
+
+  String _filterLabelFor(BuildContext context, SearchResultFilter filter) {
+    switch (filter) {
+      case SearchResultFilter.songs:
+        return context.l10n!.songs;
+      case SearchResultFilter.playlists:
+        return context.l10n!.playlists;
+    }
   }
 
   Future<bool?> _showConfirmationDialog(BuildContext context) {
