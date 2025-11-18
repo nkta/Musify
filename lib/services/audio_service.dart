@@ -473,19 +473,17 @@ class MusifyAudioHandler extends BaseAudioHandler {
             PlaybackState(
               controls: [
                 MediaControl.skipToPrevious,
-                if (audioPlayer.playing)
-                  MediaControl.pause
-                else
-                  MediaControl.play,
-                MediaControl.stop,
+                if (audioPlayer.playing) MediaControl.pause else MediaControl.play,
                 MediaControl.skipToNext,
+                MediaControl.setShuffleMode,
+                MediaControl.setRepeatMode,
               ],
               systemActions: const {
                 MediaAction.seek,
                 MediaAction.seekForward,
                 MediaAction.seekBackward,
               },
-              androidCompactActionIndices: const [0, 1, 3],
+              androidCompactActionIndices: const [0, 1, 2],
               processingState: newProcessingState,
               playing: audioPlayer.playing,
               updatePosition: audioPlayer.position,
@@ -494,6 +492,10 @@ class MusifyAudioHandler extends BaseAudioHandler {
               queueIndex: _currentQueueIndex < _queueList.length
                   ? _currentQueueIndex
                   : null,
+              shuffleMode: shuffleNotifier.value
+                  ? AudioServiceShuffleMode.all
+                  : AudioServiceShuffleMode.none,
+              repeatMode: repeatNotifier.value,
               updateTime: DateTime.now(),
             ),
           );
@@ -1676,6 +1678,16 @@ class MusifyAudioHandler extends BaseAudioHandler {
         return _buildLikedSongsMediaItems();
       }
 
+      // Artists
+      if (parentMediaId == '__ARTISTS__') {
+        return _buildArtistsMediaItems();
+      }
+
+      // Albums
+      if (parentMediaId == '__ALBUMS__') {
+        return _buildAlbumsMediaItems();
+      }
+
       // User Playlists (from YouTube/external)
       if (parentMediaId == '__USER_PLAYLISTS__') {
         return _buildUserPlaylistsMediaItems();
@@ -1692,9 +1704,34 @@ class MusifyAudioHandler extends BaseAudioHandler {
         return await _buildPlaylistSongsMediaItems(playlistId);
       }
 
+      // Artist songs
+      if (parentMediaId.startsWith('artist:')) {
+        final artist = parentMediaId.substring('artist:'.length);
+        return _buildArtistSongsMediaItems(artist);
+      }
+
+      // Album songs
+      if (parentMediaId.startsWith('album:')) {
+        final album = parentMediaId.substring('album:'.length);
+        return _buildAlbumSongsMediaItems(album);
+      }
+
       return [];
     } catch (e, stackTrace) {
       logger.log('Error in onLoadChildren', e, stackTrace);
+      return [];
+    }
+  }
+
+  @override
+  Future<List<MediaItem>> search(String query, [Map<String, dynamic>? extras]) async {
+    try {
+      final suggestions = await getSuggestions(query);
+      return suggestions
+          .map((song) => mapToMediaItem(song as Map))
+          .toList();
+    } catch (e, stackTrace) {
+      logger.log('Error in search', e, stackTrace);
       return [];
     }
   }
@@ -1721,6 +1758,24 @@ class MusifyAudioHandler extends BaseAudioHandler {
       );
     }
 
+    // Artists
+    items.add(
+      const MediaItem(
+        id: '__ARTISTS__',
+        title: 'Artists',
+        playable: false,
+      ),
+    );
+
+    // Albums
+    items.add(
+      const MediaItem(
+        id: '__ALBUMS__',
+        title: 'Albums',
+        playable: false,
+      ),
+    );
+
     // User Playlists
     if (userPlaylists.value.isNotEmpty) {
       items.add(
@@ -1744,6 +1799,62 @@ class MusifyAudioHandler extends BaseAudioHandler {
     }
 
     return items;
+  }
+
+  List<MediaItem> _buildArtistsMediaItems() {
+    final artists = <String>{};
+    for (final song in userLikedSongsList) {
+      final artist = (song as Map)['artist'];
+      if (artist != null && artist.toString().isNotEmpty) {
+        artists.add(artist.toString());
+      }
+    }
+    return artists
+        .map(
+          (artist) => MediaItem(
+            id: 'artist:$artist',
+            title: artist,
+            playable: false,
+          ),
+        )
+        .toList();
+  }
+
+  List<MediaItem> _buildAlbumsMediaItems() {
+    final albums = <String>{};
+    for (final song in userLikedSongsList) {
+      final album = (song as Map)['album'];
+      if (album != null && album.toString().isNotEmpty) {
+        albums.add(album.toString());
+      }
+    }
+    return albums
+        .map(
+          (album) => MediaItem(
+            id: 'album:$album',
+            title: album,
+            playable: false,
+          ),
+        )
+        .toList();
+  }
+
+  List<MediaItem> _buildArtistSongsMediaItems(String artist) {
+    return userLikedSongsList
+        .where(
+          (song) => (song as Map)['artist'] == artist,
+        )
+        .map((song) => mapToMediaItem(song as Map))
+        .toList();
+  }
+
+  List<MediaItem> _buildAlbumSongsMediaItems(String album) {
+    return userLikedSongsList
+        .where(
+          (song) => (song as Map)['album'] == album,
+        )
+        .map((song) => mapToMediaItem(song as Map))
+        .toList();
   }
 
   /// Builds MediaItems for liked songs
