@@ -33,6 +33,20 @@ import 'package:musify/services/settings_manager.dart';
 import 'package:musify/utilities/mediaitem.dart';
 import 'package:rxdart/rxdart.dart';
 
+// Custom notification controls for shuffle/repeat actions that aren't provided
+// by default in audio_service.
+const MediaControl _shuffleMediaControl = MediaControl(
+  androidIcon: 'drawable/ic_shuffle',
+  label: 'Shuffle',
+  action: MediaAction.setShuffleMode,
+);
+
+const MediaControl _repeatMediaControl = MediaControl(
+  androidIcon: 'drawable/ic_repeat',
+  label: 'Repeat',
+  action: MediaAction.setRepeatMode,
+);
+
 class MusifyAudioHandler extends BaseAudioHandler {
   MusifyAudioHandler() {
     _setupEventSubscriptions();
@@ -475,13 +489,15 @@ class MusifyAudioHandler extends BaseAudioHandler {
                 MediaControl.skipToPrevious,
                 if (audioPlayer.playing) MediaControl.pause else MediaControl.play,
                 MediaControl.skipToNext,
-                MediaControl.setShuffleMode,
-                MediaControl.setRepeatMode,
+                _shuffleMediaControl,
+                _repeatMediaControl,
               ],
               systemActions: const {
                 MediaAction.seek,
                 MediaAction.seekForward,
                 MediaAction.seekBackward,
+                MediaAction.setShuffleMode,
+                MediaAction.setRepeatMode,
               },
               androidCompactActionIndices: const [0, 1, 2],
               processingState: newProcessingState,
@@ -1716,10 +1732,58 @@ class MusifyAudioHandler extends BaseAudioHandler {
         return _buildAlbumSongsMediaItems(album);
       }
 
+      // History
+      if (parentMediaId == '__HISTORY__') {
+        return _buildHistoryMediaItems();
+      }
+
+      // Offline Songs
+      if (parentMediaId == '__OFFLINE__') {
+        return _buildOfflineMediaItems();
+      }
+
+      // Suggested Songs
+      if (parentMediaId == '__SUGGESTED__') {
+        return await _buildSuggestedMediaItems();
+      }
+
       return [];
     } catch (e, stackTrace) {
       logger.log('Error in onLoadChildren', e, stackTrace);
       return [];
+    }
+  }
+
+  @override
+  Future<void> playFromSearch(String query, [Map<String, dynamic>? extras]) async {
+    try {
+      if (query.isEmpty) {
+        // If query is empty, try to resume playback
+        if (!audioPlayer.playing) {
+          if (queue.value.isNotEmpty) {
+            await play();
+          } else if (userRecentlyPlayed.isNotEmpty) {
+            // If queue is empty but we have history, play from history
+            await addPlaylistToQueue(
+              List<Map>.from(userRecentlyPlayed),
+              replace: true,
+            );
+          }
+        }
+      } else {
+        // Search for the song
+        final results = await fetchSongsList(query);
+        if (results.isNotEmpty) {
+          final song = results.first;
+          if (song is Map) {
+            await playSong(song, resetQueue: true);
+          }
+        } else {
+          logger.log('No results found for voice search: $query', null, null);
+        }
+      }
+    } catch (e, stackTrace) {
+      logger.log('Error in playFromSearch', e, stackTrace);
     }
   }
 
@@ -1732,6 +1796,16 @@ class MusifyAudioHandler extends BaseAudioHandler {
           .toList();
     } catch (e, stackTrace) {
       logger.log('Error in search', e, stackTrace);
+      return [];
+    }
+  }
+
+  Future<List<Map>> getSuggestions(String query) async {
+    try {
+      final results = await fetchSongsList(query);
+      return results.whereType<Map>().toList();
+    } catch (e, stackTrace) {
+      logger.log('Error getting suggestions', e, stackTrace);
       return [];
     }
   }
@@ -1797,6 +1871,37 @@ class MusifyAudioHandler extends BaseAudioHandler {
         ),
       );
     }
+
+    // History
+    if (userRecentlyPlayed.isNotEmpty) {
+      items.add(
+        const MediaItem(
+          id: '__HISTORY__',
+          title: 'History',
+          playable: false,
+        ),
+      );
+    }
+
+    // Offline Songs
+    if (userOfflineSongs.isNotEmpty) {
+      items.add(
+        const MediaItem(
+          id: '__OFFLINE__',
+          title: 'Offline Songs',
+          playable: false,
+        ),
+      );
+    }
+
+    // Suggested Songs
+    items.add(
+      const MediaItem(
+        id: '__SUGGESTED__',
+        title: 'Suggested',
+        playable: false,
+      ),
+    );
 
     return items;
   }
@@ -1927,6 +2032,30 @@ class MusifyAudioHandler extends BaseAudioHandler {
       return [];
     } catch (e, stackTrace) {
       logger.log('Error building playlist songs', e, stackTrace);
+      return [];
+    }
+  }
+
+  List<MediaItem> _buildHistoryMediaItems() {
+    return userRecentlyPlayed
+        .map((song) => mapToMediaItem(song as Map))
+        .toList();
+  }
+
+  List<MediaItem> _buildOfflineMediaItems() {
+    return userOfflineSongs
+        .map((song) => mapToMediaItem(song as Map))
+        .toList();
+  }
+
+  Future<List<MediaItem>> _buildSuggestedMediaItems() async {
+    try {
+      final suggestions = await getRecommendedSongs();
+      return suggestions
+          .map((song) => mapToMediaItem(song as Map))
+          .toList();
+    } catch (e, stackTrace) {
+      logger.log('Error building suggested songs', e, stackTrace);
       return [];
     }
   }
