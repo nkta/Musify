@@ -1,5 +1,5 @@
 /*
- *     Copyright (C) 2025 Valeri Gokadze
+ *     Copyright (C) 2026 Valeri Gokadze
  *
  *     Musify is free software: you can redistribute it and/or modify
  *     it under the terms of the GNU General Public License as published by
@@ -40,7 +40,9 @@ const commonCustomBarRadiusLast = BorderRadius.vertical(
   bottom: Radius.circular(16),
 );
 
-const commonListViewBottmomPadding = EdgeInsets.only(bottom: 8);
+const miniPlayerTotalHeight = 92.0;
+
+const commonListViewBottomPadding = EdgeInsets.only(bottom: 8);
 
 const commonBarContentPadding = EdgeInsets.symmetric(
   vertical: 12,

@@ -1,8 +1,8 @@
 Bug fixes
-- Fixed offline songs issues
+- Fixed repeat/loop problems
+- Fixed SponsorBlock problems
 
 Enhancements
-- Improved settings page
+- Added several new albums
 - Updated translations
-- Various other UI/UX improvements
 - Full changelog: https://github.com/gokadzev/Musify/releases

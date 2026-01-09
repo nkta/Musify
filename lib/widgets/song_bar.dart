@@ -1,5 +1,5 @@
 /*
- *     Copyright (C) 2025 Valeri Gokadze
+ *     Copyright (C) 2026 Valeri Gokadze
  *
  *     Musify is free software: you can redistribute it and/or modify
  *     it under the terms of the GNU General Public License as published by
@@ -31,6 +31,7 @@ import 'package:musify/utilities/common_variables.dart';
 import 'package:musify/utilities/flutter_toast.dart';
 import 'package:musify/utilities/formatter.dart';
 import 'package:musify/widgets/no_artwork_cube.dart';
+import 'package:musify/widgets/rename_song_dialog.dart';
 
 class SongBar extends StatefulWidget {
   const SongBar(
@@ -43,6 +44,9 @@ class SongBar extends StatefulWidget {
     this.isRecentSong,
     this.onRemove,
     this.borderRadius = BorderRadius.zero,
+    this.isFromLikedSongs = false,
+    this.playlistId,
+    this.onRenamed,
     super.key,
   });
 
@@ -55,6 +59,9 @@ class SongBar extends StatefulWidget {
   final bool? isRecentSong;
   final bool showMusicDuration;
   final BorderRadius borderRadius;
+  final bool isFromLikedSongs;
+  final String? playlistId;
+  final VoidCallback? onRenamed;
 
   @override
   State<SongBar> createState() => _SongBarState();
@@ -68,8 +75,8 @@ class _SongBarState extends State<SongBar> {
 
   late final ValueNotifier<bool> _songLikeStatus;
   late final ValueNotifier<bool> _songOfflineStatus;
-  late final String _songTitle;
-  late final String _songArtist;
+  late String _songTitle;
+  late String _songArtist;
   late final String? _artworkPath;
   late final String _lowResImageUrl;
   late final String _ytid;
@@ -94,6 +101,22 @@ class _SongBarState extends State<SongBar> {
   }
 
   @override
+  void didUpdateWidget(SongBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    // Update cached title and artist if they changed
+    final newTitle = widget.song['title'] ?? '';
+    final newArtist = widget.song['artist']?.toString() ?? '';
+
+    if (_songTitle != newTitle || _songArtist != newArtist) {
+      setState(() {
+        _songTitle = newTitle;
+        _songArtist = newArtist;
+      });
+    }
+  }
+
+  @override
   void dispose() {
     _songLikeStatus.dispose();
     _songOfflineStatus.dispose();
@@ -102,32 +125,31 @@ class _SongBarState extends State<SongBar> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final primaryColor = theme.colorScheme.primary;
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Padding(
       padding: commonBarPadding,
-      child: GestureDetector(
-        onTap: _handleSongTap,
-        child: Card(
-          color: widget.backgroundColor,
-          shape: RoundedRectangleBorder(borderRadius: widget.borderRadius),
-          margin: const EdgeInsets.only(bottom: 3),
+      child: Card(
+        color: widget.backgroundColor,
+        shape: RoundedRectangleBorder(borderRadius: widget.borderRadius),
+        margin: const EdgeInsets.only(bottom: 3),
+        child: InkWell(
+          borderRadius: widget.borderRadius,
+          onTap: _handleSongTap,
           child: Padding(
-            padding: commonBarContentPadding,
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
             child: Row(
               children: [
-                _buildAlbumArt(primaryColor),
-                const SizedBox(width: 8),
+                _buildAlbumArt(colorScheme),
+                const SizedBox(width: 12),
                 Expanded(
                   child: _SongInfo(
                     title: _songTitle,
                     artist: _songArtist,
-                    primaryColor: primaryColor,
-                    secondaryColor: theme.colorScheme.secondary,
+                    colorScheme: colorScheme,
                   ),
                 ),
-                _buildActionButtons(context, primaryColor),
+                _buildActionButtons(context, colorScheme),
               ],
             ),
           ),
@@ -148,8 +170,8 @@ class _SongBarState extends State<SongBar> {
     );
   }
 
-  Widget _buildAlbumArt(Color primaryColor) {
-    const size = 55.0;
+  Widget _buildAlbumArt(ColorScheme colorScheme) {
+    const size = 48.0;
     final isDurationAvailable =
         widget.showMusicDuration && widget.song['duration'] != null;
 
@@ -160,7 +182,7 @@ class _SongBarState extends State<SongBar> {
           return _OfflineArtwork(
             artworkPath: _artworkPath,
             size: size,
-            primaryColor: primaryColor,
+            colorScheme: colorScheme,
           );
         }
 
@@ -168,7 +190,7 @@ class _SongBarState extends State<SongBar> {
           lowResImageUrl: _lowResImageUrl,
           size: size,
           isDurationAvailable: isDurationAvailable,
-          primaryColor: primaryColor,
+          colorScheme: colorScheme,
           duration: widget.song['duration'],
           isOffline: isOffline,
         );
@@ -176,11 +198,14 @@ class _SongBarState extends State<SongBar> {
     );
   }
 
-  Widget _buildActionButtons(BuildContext context, Color primaryColor) {
+  Widget _buildActionButtons(BuildContext context, ColorScheme colorScheme) {
     return PopupMenuButton<String>(
-      icon: Icon(FluentIcons.more_horizontal_24_filled, color: primaryColor),
+      icon: Icon(
+        FluentIcons.more_horizontal_24_filled,
+        color: colorScheme.onSurfaceVariant,
+      ),
       onSelected: (value) => _handleMenuAction(context, value),
-      itemBuilder: (context) => _buildMenuItems(context, primaryColor),
+      itemBuilder: (context) => _buildMenuItems(context, colorScheme),
     );
   }
 
@@ -188,6 +213,14 @@ class _SongBarState extends State<SongBar> {
     switch (value) {
       case 'play_next':
         audioHandler.playNext(widget.song);
+        showToast(
+          context,
+          context.l10n!.songAdded,
+          duration: const Duration(seconds: 1),
+        );
+        break;
+      case 'add_to_queue':
+        audioHandler.addToQueue(widget.song);
         showToast(
           context,
           context.l10n!.songAdded,
@@ -207,9 +240,19 @@ class _SongBarState extends State<SongBar> {
           _songLikeStatus.value = !newValue;
           currentLikedSongsLength.value = likedSongsLength;
         });
+        showToast(
+          context,
+          newValue
+              ? context.l10n!.addedToLikedSongs
+              : context.l10n!.removedFromLikedSongs,
+          duration: const Duration(seconds: 1),
+        );
         break;
       case 'remove':
         widget.onRemove?.call();
+        break;
+      case 'rename':
+        _handleRenameSong(context);
         break;
       case 'add_to_playlist':
         showAddToPlaylistDialog(context, widget.song);
@@ -222,6 +265,62 @@ class _SongBarState extends State<SongBar> {
       case 'offline':
         _handleOfflineToggle(context);
         break;
+    }
+  }
+
+  void _handleRenameSong(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => RenameSongDialog(
+        currentTitle: _songTitle,
+        currentArtist: _songArtist,
+        onRename: (newTitle, newArtist) {
+          _renameSong(newTitle, newArtist, context);
+        },
+      ),
+    );
+  }
+
+  Future<void> _renameSong(
+    String newTitle,
+    String newArtist,
+    BuildContext context,
+  ) async {
+    try {
+      if (widget.isFromLikedSongs) {
+        await renameSongInLikedSongs(_ytid, newTitle, newArtist);
+        // Update local cached values
+        widget.song['title'] = newTitle;
+        widget.song['artist'] = newArtist;
+        if (context.mounted) {
+          showToast(context, context.l10n!.settingChangedMsg);
+          // Force rebuild by triggering value change
+          // Temporarily change the value to force ValueListenableBuilder to rebuild
+          final oldValue = currentLikedSongsLength.value;
+          currentLikedSongsLength.value = oldValue + 1;
+          currentLikedSongsLength.value = oldValue;
+        }
+      } else if (widget.playlistId != null) {
+        await renameSongInPlaylist(
+          widget.playlistId,
+          _ytid,
+          newTitle,
+          newArtist,
+        );
+        // Update local cached values
+        widget.song['title'] = newTitle;
+        widget.song['artist'] = newArtist;
+        if (context.mounted) {
+          showToast(context, context.l10n!.settingChangedMsg);
+          // Trigger parent page rebuild for custom playlists
+          widget.onRenamed?.call();
+        }
+      }
+    } catch (e, stackTrace) {
+      logger.log('Error renaming song', e, stackTrace);
+      if (context.mounted) {
+        showToast(context, context.l10n!.error);
+      }
     }
   }
 
@@ -259,16 +358,48 @@ class _SongBarState extends State<SongBar> {
 
   List<PopupMenuEntry<String>> _buildMenuItems(
     BuildContext context,
-    Color primaryColor,
+    ColorScheme colorScheme,
   ) {
+    // Capture localization strings before building menu items to avoid
+    // accessing context.l10n inside ValueListenableBuilder which can fail
+    // when the widget is being disposed
+    final l10n = context.l10n!;
+    final playNextText = l10n.playNext;
+    final addToQueueText = l10n.addToQueue;
+    final removeFromLikedSongsText = l10n.removeFromLikedSongs;
+    final addToLikedSongsText = l10n.addToLikedSongs;
+    final removeFromPlaylistText = l10n.removeFromPlaylist;
+    final addToPlaylistText = l10n.addToPlaylist;
+    final removeFromRecentlyPlayedText = l10n.removeFromRecentlyPlayed;
+    final removeOfflineText = l10n.removeOffline;
+    final makeOfflineText = l10n.makeOffline;
+    final renameSongText = l10n.renameSong;
+    final canRename = widget.isFromLikedSongs || widget.playlistId != null;
+
     return [
       PopupMenuItem<String>(
         value: 'play_next',
         child: Row(
           children: [
-            Icon(FluentIcons.receipt_play_24_regular, color: primaryColor),
+            Icon(
+              FluentIcons.receipt_play_24_regular,
+              color: colorScheme.primary,
+            ),
             const SizedBox(width: 8),
-            Text(context.l10n!.playNext),
+            Text(playNextText, style: TextStyle(color: colorScheme.secondary)),
+          ],
+        ),
+      ),
+      PopupMenuItem<String>(
+        value: 'add_to_queue',
+        child: Row(
+          children: [
+            Icon(FluentIcons.add_24_regular, color: colorScheme.primary),
+            const SizedBox(width: 8),
+            Text(
+              addToQueueText,
+              style: TextStyle(color: colorScheme.secondary),
+            ),
           ],
         ),
       ),
@@ -279,26 +410,42 @@ class _SongBarState extends State<SongBar> {
           builder: (_, value, __) {
             return Row(
               children: [
-                Icon(likeStatusToIconMapper[value], color: primaryColor),
+                Icon(likeStatusToIconMapper[value], color: colorScheme.primary),
                 const SizedBox(width: 8),
                 Text(
-                  value
-                      ? context.l10n!.removeFromLikedSongs
-                      : context.l10n!.addToLikedSongs,
+                  value ? removeFromLikedSongsText : addToLikedSongsText,
+                  style: TextStyle(color: colorScheme.secondary),
                 ),
               ],
             );
           },
         ),
       ),
+      if (canRename)
+        PopupMenuItem<String>(
+          value: 'rename',
+          child: Row(
+            children: [
+              Icon(FluentIcons.edit_24_regular, color: colorScheme.primary),
+              const SizedBox(width: 8),
+              Text(
+                renameSongText,
+                style: TextStyle(color: colorScheme.secondary),
+              ),
+            ],
+          ),
+        ),
       if (widget.onRemove != null)
         PopupMenuItem<String>(
           value: 'remove',
           child: Row(
             children: [
-              Icon(FluentIcons.delete_24_filled, color: primaryColor),
+              Icon(FluentIcons.delete_24_filled, color: colorScheme.primary),
               const SizedBox(width: 8),
-              Text(context.l10n!.removeFromPlaylist),
+              Text(
+                removeFromPlaylistText,
+                style: TextStyle(color: colorScheme.secondary),
+              ),
             ],
           ),
         ),
@@ -306,9 +453,12 @@ class _SongBarState extends State<SongBar> {
         value: 'add_to_playlist',
         child: Row(
           children: [
-            Icon(FluentIcons.add_24_regular, color: primaryColor),
+            Icon(FluentIcons.add_24_regular, color: colorScheme.primary),
             const SizedBox(width: 8),
-            Text(context.l10n!.addToPlaylist),
+            Text(
+              addToPlaylistText,
+              style: TextStyle(color: colorScheme.secondary),
+            ),
           ],
         ),
       ),
@@ -317,9 +467,12 @@ class _SongBarState extends State<SongBar> {
           value: 'remove_from_recents',
           child: Row(
             children: [
-              Icon(FluentIcons.delete_24_filled, color: primaryColor),
+              Icon(FluentIcons.delete_24_filled, color: colorScheme.primary),
               const SizedBox(width: 8),
-              Text(context.l10n!.removeFromRecentlyPlayed),
+              Text(
+                removeFromRecentlyPlayedText,
+                style: TextStyle(color: colorScheme.secondary),
+              ),
             ],
           ),
         ),
@@ -334,13 +487,12 @@ class _SongBarState extends State<SongBar> {
                   value
                       ? FluentIcons.cellular_off_24_regular
                       : FluentIcons.cellular_data_1_24_regular,
-                  color: primaryColor,
+                  color: colorScheme.primary,
                 ),
                 const SizedBox(width: 8),
                 Text(
-                  value
-                      ? context.l10n!.removeOffline
-                      : context.l10n!.makeOffline,
+                  value ? removeOfflineText : makeOfflineText,
+                  style: TextStyle(color: colorScheme.secondary),
                 ),
               ],
             );
@@ -355,14 +507,12 @@ class _SongInfo extends StatelessWidget {
   const _SongInfo({
     required this.title,
     required this.artist,
-    required this.primaryColor,
-    required this.secondaryColor,
+    required this.colorScheme,
   });
 
   final String title;
   final String artist;
-  final Color primaryColor;
-  final Color secondaryColor;
+  final ColorScheme colorScheme;
 
   @override
   Widget build(BuildContext context) {
@@ -372,16 +522,20 @@ class _SongInfo extends StatelessWidget {
         Text(
           title,
           overflow: TextOverflow.ellipsis,
-          style: commonBarTitleStyle.copyWith(color: primaryColor),
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+            fontSize: 15,
+            color: colorScheme.secondary,
+          ),
         ),
-        const SizedBox(height: 3),
+        const SizedBox(height: 2),
         Text(
           artist,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
             fontWeight: FontWeight.w400,
             fontSize: 13,
-            color: secondaryColor,
+            color: colorScheme.onSurfaceVariant,
           ),
         ),
       ],
@@ -393,12 +547,12 @@ class _OfflineArtwork extends StatelessWidget {
   const _OfflineArtwork({
     required this.artworkPath,
     required this.size,
-    required this.primaryColor,
+    required this.colorScheme,
   });
 
   final String artworkPath;
   final double size;
-  final Color primaryColor;
+  final ColorScheme colorScheme;
 
   @override
   Widget build(BuildContext context) {
@@ -406,7 +560,7 @@ class _OfflineArtwork extends StatelessWidget {
       width: size,
       height: size,
       child: ClipRRect(
-        borderRadius: BorderRadiusGeometry.circular(commonMiniArtworkRadius),
+        borderRadius: BorderRadius.circular(10),
         child: Stack(
           alignment: Alignment.center,
           children: [
@@ -415,20 +569,14 @@ class _OfflineArtwork extends StatelessWidget {
               width: size,
               height: size,
               fit: BoxFit.cover,
-              color: Theme.of(context).colorScheme.primaryContainer,
+              color: colorScheme.primaryContainer,
               colorBlendMode: BlendMode.multiply,
               opacity: const AlwaysStoppedAnimation(0.45),
             ),
-            SizedBox(
-              width: size - 10,
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Icon(
-                  FluentIcons.cellular_off_24_filled,
-                  size: 24,
-                  color: primaryColor,
-                ),
-              ),
+            Icon(
+              FluentIcons.cellular_off_24_filled,
+              size: 20,
+              color: colorScheme.primary,
             ),
           ],
         ),
@@ -442,7 +590,7 @@ class _OnlineArtwork extends StatelessWidget {
     required this.lowResImageUrl,
     required this.size,
     required this.isDurationAvailable,
-    required this.primaryColor,
+    required this.colorScheme,
     required this.duration,
     required this.isOffline,
   });
@@ -450,7 +598,7 @@ class _OnlineArtwork extends StatelessWidget {
   final String lowResImageUrl;
   final double size;
   final bool isDurationAvailable;
-  final Color primaryColor;
+  final ColorScheme colorScheme;
   final dynamic duration;
   final bool isOffline;
 
@@ -475,15 +623,13 @@ class _OnlineArtwork extends StatelessWidget {
             memCacheWidth: 256,
             memCacheHeight: 256,
             imageBuilder: (context, imageProvider) => ClipRRect(
-              borderRadius: BorderRadiusGeometry.circular(
-                commonMiniArtworkRadius,
-              ),
+              borderRadius: BorderRadius.circular(10),
               child: Stack(
                 alignment: Alignment.center,
                 children: [
                   Image(
                     color: shouldOverlayBeShown
-                        ? Theme.of(context).colorScheme.primaryContainer
+                        ? colorScheme.primaryContainer
                         : null,
                     colorBlendMode: shouldOverlayBeShown
                         ? BlendMode.multiply
@@ -500,16 +646,10 @@ class _OnlineArtwork extends StatelessWidget {
                         : null,
                   ),
                   if (isOffline)
-                    SizedBox(
-                      width: size - 10,
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Icon(
-                          FluentIcons.cellular_off_24_filled,
-                          size: 24,
-                          color: primaryColor,
-                        ),
-                      ),
+                    Icon(
+                      FluentIcons.cellular_off_24_filled,
+                      size: 20,
+                      color: colorScheme.primary,
                     ),
                 ],
               ),
@@ -518,17 +658,12 @@ class _OnlineArtwork extends StatelessWidget {
                 const NullArtworkWidget(iconSize: 30),
           ),
           if (isDurationAvailable && !isOffline)
-            SizedBox(
-              width: size - 10,
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Text(
-                  '(${formatDuration(duration)})',
-                  style: TextStyle(
-                    color: primaryColor,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+            Text(
+              '(${formatDuration(duration)})',
+              style: TextStyle(
+                color: colorScheme.primary,
+                fontWeight: FontWeight.bold,
+                fontSize: 12,
               ),
             ),
         ],

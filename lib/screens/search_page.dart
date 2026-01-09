@@ -1,3 +1,23 @@
+/*
+ *     Copyright (C) 2026 Valeri Gokadze
+ *
+ *     Musify is free software: you can redistribute it and/or modify
+ *     it under the terms of the GNU General Public License as published by
+ *     the Free Software Foundation, either version 3 of the License, or
+ *     (at your option) any later version.
+ *
+ *     Musify is distributed in the hope that it will be useful,
+ *     but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *     GNU General Public License for more details.
+ *
+ *     You should have received a copy of the GNU General Public License
+ *     along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ *
+ *
+ *     For more information about Musify, including how to contribute,
+ *     please visit: https://github.com/gokadzev/Musify
+ */
 import 'dart:async';
 
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
@@ -70,6 +90,7 @@ class _SearchPageState extends State<SearchPage> {
   void dispose() {
     _searchBar.dispose();
     _inputNode.dispose();
+    _fetchingSongs.dispose();
     _debounce?.cancel();
     super.dispose();
   }
@@ -184,28 +205,53 @@ class _SearchPageState extends State<SearchPage> {
         padding: commonSingleChildScrollViewPadding,
         child: Column(
           children: <Widget>[
-            CustomSearchBar(
-              loadingProgressNotifier: _fetchingSongs,
-              controller: _searchBar,
-              focusNode: _inputNode,
-              labelText: '${context.l10n!.search}...',
-              onChanged: (value) {
-                // debounce suggestions to avoid rapid API calls
-                _debounce?.cancel();
-                _debounce = Timer(const Duration(milliseconds: 300), () async {
-                  if (value.isNotEmpty) {
-                    final s = await getSearchSuggestions(value);
-                    _suggestionsList = List<String>.from(s);
-                  } else {
-                    _suggestionsList = [];
-                  }
-                  if (mounted) setState(() {});
-                });
-              },
-              onSubmitted: (String value) {
-                search();
-                _suggestionsList = [];
-                _inputNode.unfocus();
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final isWide = constraints.maxWidth > 600;
+                final bar = ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: isWide ? 600 : double.infinity,
+                  ),
+                  child: CustomSearchBar(
+                    loadingProgressNotifier: _fetchingSongs,
+                    controller: _searchBar,
+                    focusNode: _inputNode,
+                    labelText: '${context.l10n!.search}...',
+                    onChanged: (value) {
+                      // debounce suggestions to avoid rapid API calls
+                      _debounce?.cancel();
+                      _debounce = Timer(
+                        const Duration(milliseconds: 300),
+                        () async {
+                          if (value.isNotEmpty) {
+                            final searchSuggestions =
+                                await getSearchSuggestions(value);
+
+                            _suggestionsList = List<String>.from(
+                              searchSuggestions,
+                            );
+                          } else {
+                            _suggestionsList = [];
+                          }
+                          if (mounted) setState(() {});
+                        },
+                      );
+                    },
+                    onSubmitted: (String value) {
+                      search();
+                      _suggestionsList = [];
+                      _inputNode.unfocus();
+                    },
+                  ),
+                );
+                if (isWide) {
+                  return Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [bar],
+                  );
+                } else {
+                  return bar;
+                }
               },
             ),
             const SizedBox(height: 12),
@@ -316,7 +362,13 @@ class _SearchPageState extends State<SearchPage> {
 
     // Songs section
     if (showSongs && _songsSearchResult.isNotEmpty) {
-      widgets.add(SectionTitle(context.l10n!.songs, primaryColor));
+      widgets.add(
+        SectionTitle(
+          context.l10n!.songs,
+          primaryColor,
+          icon: FluentIcons.music_note_1_24_filled,
+        ),
+      );
 
       final songsCount = _songsSearchResult.length > maxSongsInList
           ? maxSongsInList
@@ -338,7 +390,13 @@ class _SearchPageState extends State<SearchPage> {
 
     // Albums section
     if (showPlaylists && _albumsSearchResult.isNotEmpty) {
-      widgets.add(SectionTitle(context.l10n!.albums, primaryColor));
+      widgets.add(
+        SectionTitle(
+          context.l10n!.albums,
+          primaryColor,
+          icon: FluentIcons.album_24_filled,
+        ),
+      );
 
       final albumsCount = _albumsSearchResult.length > maxSongsInList
           ? maxSongsInList
@@ -364,7 +422,13 @@ class _SearchPageState extends State<SearchPage> {
 
     // Playlists section
     if (showPlaylists && _playlistsSearchResult.isNotEmpty) {
-      widgets.add(SectionTitle(context.l10n!.playlists, primaryColor));
+      widgets.add(
+        SectionTitle(
+          context.l10n!.playlists,
+          primaryColor,
+          icon: FluentIcons.list_24_filled,
+        ),
+      );
 
       final playlistsCount = _playlistsSearchResult.length > maxSongsInList
           ? maxSongsInList
@@ -376,7 +440,7 @@ class _SearchPageState extends State<SearchPage> {
 
         widgets.add(
           Padding(
-            padding: isLast ? commonListViewBottmomPadding : EdgeInsets.zero,
+            padding: isLast ? commonListViewBottomPadding : EdgeInsets.zero,
             child: PlaylistBar(
               key: ValueKey('playlist_${playlist['ytid']}_$index'),
               playlist['title'],

@@ -1,5 +1,5 @@
 /*
- *     Copyright (C) 2025 Valeri Gokadze
+ *     Copyright (C) 2026 Valeri Gokadze
  *
  *     Musify is free software: you can redistribute it and/or modify
  *     it under the terms of the GNU General Public License as published by
@@ -85,7 +85,10 @@ class SettingsPage extends StatelessWidget {
   ) {
     return Column(
       children: [
-        SectionHeader(title: context.l10n!.preferences),
+        SectionHeader(
+          title: context.l10n!.preferences,
+          icon: FluentIcons.options_24_filled,
+        ),
         CustomBar(
           context.l10n!.accentColor,
           FluentIcons.color_24_filled,
@@ -236,17 +239,17 @@ class SettingsPage extends StatelessWidget {
           },
         ),
         ValueListenableBuilder<bool>(
-          valueListenable: defaultRecommendations,
+          valueListenable: externalRecommendations,
           builder: (_, value, __) {
             return CustomBar(
-              context.l10n!.originalRecommendations,
+              context.l10n!.externalRecommendations,
               FluentIcons.channel_share_24_regular,
-              description: context.l10n!.originalRecommendationsDescription,
+              description: context.l10n!.externalRecommendationsDescription,
               borderRadius: commonCustomBarRadiusLast,
               trailing: Switch(
                 value: value,
                 onChanged: (value) =>
-                    _toggleDefaultRecommendations(context, value),
+                    _toggleExternalRecommendations(context, value),
               ),
             );
           },
@@ -261,7 +264,10 @@ class SettingsPage extends StatelessWidget {
   Widget _buildToolsSection(BuildContext context) {
     return Column(
       children: [
-        SectionHeader(title: context.l10n!.tools),
+        SectionHeader(
+          title: context.l10n!.tools,
+          icon: FluentIcons.toolbox_24_filled,
+        ),
         CustomBar(
           context.l10n!.clearCache,
           FluentIcons.broom_24_filled,
@@ -334,15 +340,14 @@ class SettingsPage extends StatelessWidget {
   }
 
   Widget _buildSponsorSection(BuildContext context, Color primaryColor) {
-    final gradientEnd = Color.lerp(primaryColor, Colors.pink, 0.3)!;
-    final shadowColor = primaryColor.withValues(alpha: 0.3);
-    final iconBgColor = Colors.white.withValues(alpha: 0.2);
-    final arrowBgColor = Colors.white.withValues(alpha: 0.15);
-    final arrowColor = Colors.white.withValues(alpha: 0.9);
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Column(
       children: [
-        SectionHeader(title: context.l10n!.becomeSponsor),
+        SectionHeader(
+          title: context.l10n!.becomeSponsor,
+          icon: FluentIcons.heart_24_filled,
+        ),
         Padding(
           padding: commonBarPadding,
           child: Card(
@@ -353,26 +358,11 @@ class SettingsPage extends StatelessWidget {
             ),
             child: DecoratedBox(
               decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    primaryColor,
-                    primaryColor.withValues(alpha: 0.8),
-                    gradientEnd,
-                  ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
                 borderRadius: BorderRadius.circular(15),
-                boxShadow: [
-                  BoxShadow(
-                    color: shadowColor,
-                    blurRadius: 8,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
               ),
               child: Material(
-                color: Colors.transparent,
+                color: colorScheme.primaryContainer,
+                borderRadius: BorderRadius.circular(15),
                 child: InkWell(
                   borderRadius: BorderRadius.circular(15),
                   onTap: () =>
@@ -383,18 +373,20 @@ class SettingsPage extends StatelessWidget {
                       horizontal: 16,
                     ),
                     child: SizedBox(
-                      height: 45, // Match CustomBar's minTileHeight
+                      height: 45,
                       child: Row(
                         children: [
                           Container(
                             padding: const EdgeInsets.all(8),
                             decoration: BoxDecoration(
-                              color: iconBgColor,
-                              shape: BoxShape.circle,
+                              color: colorScheme.onPrimaryContainer.withValues(
+                                alpha: 0.15,
+                              ),
+                              borderRadius: BorderRadius.circular(12),
                             ),
-                            child: const Icon(
+                            child: Icon(
                               FluentIcons.heart_24_filled,
-                              color: Colors.white,
+                              color: colorScheme.onPrimaryContainer,
                               size: 24,
                             ),
                           ),
@@ -402,22 +394,24 @@ class SettingsPage extends StatelessWidget {
                           Expanded(
                             child: Text(
                               context.l10n!.sponsorProject,
-                              style: const TextStyle(
-                                color: Colors.white,
+                              style: TextStyle(
+                                color: colorScheme.onPrimaryContainer,
                                 fontSize: 16,
-                                fontWeight: FontWeight.w600, // Match CustomBar
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
                           ),
                           Container(
                             padding: const EdgeInsets.all(6),
                             decoration: BoxDecoration(
-                              color: arrowBgColor,
+                              color: colorScheme.onPrimaryContainer.withValues(
+                                alpha: 0.1,
+                              ),
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Icon(
                               FluentIcons.arrow_right_24_filled,
-                              color: arrowColor,
+                              color: colorScheme.onPrimaryContainer,
                               size: 16,
                             ),
                           ),
@@ -437,7 +431,10 @@ class SettingsPage extends StatelessWidget {
   Widget _buildOthersSection(BuildContext context) {
     return Column(
       children: [
-        SectionHeader(title: context.l10n!.others),
+        SectionHeader(
+          title: context.l10n!.others,
+          icon: FluentIcons.more_circle_24_filled,
+        ),
         CustomBar(
           context.l10n!.licenses,
           FluentIcons.document_24_filled,
@@ -467,48 +464,58 @@ class SettingsPage extends StatelessWidget {
   }
 
   void _showAccentColorPicker(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     showCustomBottomSheet(
       context,
-      GridView.builder(
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 5,
-        ),
-        shrinkWrap: true,
-        physics: const BouncingScrollPhysics(),
-        itemCount: availableColors.length,
-        itemBuilder: (context, index) {
-          final color = availableColors[index];
-          final isSelected = color == primaryColorSetting;
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: GridView.builder(
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 5,
+            mainAxisSpacing: 12,
+            crossAxisSpacing: 12,
+          ),
+          shrinkWrap: true,
+          physics: const BouncingScrollPhysics(),
+          itemCount: availableColors.length,
+          itemBuilder: (context, index) {
+            final color = availableColors[index];
+            final isSelected = color == primaryColorSetting;
 
-          return GestureDetector(
-            onTap: () {
-              addOrUpdateData('settings', 'accentColor', color.toARGB32());
-              Musify.updateAppState(
-                context,
-                newAccentColor: color,
-                useSystemColor: false,
-              );
-              showToast(context, context.l10n!.accentChangeMsg);
-              Navigator.pop(context);
-            },
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                CircleAvatar(
-                  radius: 25,
-                  backgroundColor: themeMode == ThemeMode.light
-                      ? color.withAlpha(150)
-                      : color,
+            return GestureDetector(
+              onTap: () {
+                addOrUpdateData('settings', 'accentColor', color.toARGB32());
+                Musify.updateAppState(
+                  context,
+                  newAccentColor: color,
+                  useSystemColor: false,
+                );
+                showToast(context, context.l10n!.accentChangeMsg);
+                Navigator.pop(context);
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                decoration: BoxDecoration(
+                  color: color,
+                  shape: BoxShape.circle,
+                  border: isSelected
+                      ? Border.all(color: colorScheme.onSurface, width: 3)
+                      : null,
                 ),
-                if (isSelected)
-                  Icon(
-                    Icons.check,
-                    color: Theme.of(context).colorScheme.onPrimary,
-                  ),
-              ],
-            ),
-          );
-        },
+                child: isSelected
+                    ? Icon(
+                        FluentIcons.checkmark_20_filled,
+                        color: color.computeLuminance() > 0.5
+                            ? Colors.black
+                            : Colors.white,
+                        size: 24,
+                      )
+                    : null,
+              ),
+            );
+          },
+        ),
       ),
     );
   }
@@ -524,7 +531,7 @@ class SettingsPage extends StatelessWidget {
       ListView.builder(
         shrinkWrap: true,
         physics: const BouncingScrollPhysics(),
-        padding: commonListViewBottmomPadding,
+        padding: commonListViewBottomPadding,
         itemCount: availableModes.length,
         itemBuilder: (context, index) {
           final mode = availableModes[index];
@@ -546,7 +553,7 @@ class SettingsPage extends StatelessWidget {
               Musify.updateAppState(context, newThemeMode: mode);
               Navigator.pop(context);
             },
-            themeMode == mode ? activatedColor : inactivatedColor,
+            themeMode == mode,
             borderRadius: borderRadius,
           );
         },
@@ -571,7 +578,7 @@ class SettingsPage extends StatelessWidget {
       ListView.builder(
         shrinkWrap: true,
         physics: const BouncingScrollPhysics(),
-        padding: commonListViewBottmomPadding,
+        padding: commonListViewBottomPadding,
         itemCount: availableLanguages.length,
         itemBuilder: (context, index) {
           final language = availableLanguages[index];
@@ -593,9 +600,7 @@ class SettingsPage extends StatelessWidget {
               showToast(context, context.l10n!.languageMsg);
               Navigator.pop(context);
             },
-            activeLanguageFullCode == newLocaleFullCode
-                ? activatedColor
-                : inactivatedColor,
+            activeLanguageFullCode == newLocaleFullCode,
             borderRadius: borderRadius,
           );
         },
@@ -620,7 +625,7 @@ class SettingsPage extends StatelessWidget {
       ListView.builder(
         shrinkWrap: true,
         physics: const BouncingScrollPhysics(),
-        padding: commonListViewBottmomPadding,
+        padding: commonListViewBottomPadding,
         itemCount: availableQualities.length,
         itemBuilder: (context, index) {
           final quality = availableQualities[index];
@@ -638,7 +643,7 @@ class SettingsPage extends StatelessWidget {
               showToast(context, context.l10n!.audioQualityMsg);
               Navigator.pop(context);
             },
-            isCurrentQuality ? activatedColor : inactivatedColor,
+            isCurrentQuality,
             borderRadius: borderRadius,
           );
         },
@@ -680,7 +685,6 @@ class SettingsPage extends StatelessWidget {
 
     // Trigger router refresh and notify about the change
     NavigationManager.refreshRouter();
-    offlineModeChangeNotifier.value = !offlineModeChangeNotifier.value;
 
     showToast(context, context.l10n!.settingChangedMsg);
   }
@@ -697,9 +701,9 @@ class SettingsPage extends StatelessWidget {
     showToast(context, context.l10n!.settingChangedMsg);
   }
 
-  void _toggleDefaultRecommendations(BuildContext context, bool value) {
-    addOrUpdateData('settings', 'defaultRecommendations', value);
-    defaultRecommendations.value = value;
+  void _toggleExternalRecommendations(BuildContext context, bool value) {
+    addOrUpdateData('settings', 'externalRecommendations', value);
+    externalRecommendations.value = value;
     showToast(context, context.l10n!.settingChangedMsg);
   }
 
@@ -725,18 +729,33 @@ class SettingsPage extends StatelessWidget {
   }
 
   Future<void> _backupUserData(BuildContext context) async {
+    final colorScheme = Theme.of(context).colorScheme;
+
     try {
       await showDialog(
         context: context,
         builder: (BuildContext context) {
           return AlertDialog(
-            content: Text(context.l10n!.folderRestrictions),
+            backgroundColor: colorScheme.surface,
+            surfaceTintColor: Colors.transparent,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(28),
+            ),
+            icon: Icon(
+              FluentIcons.info_24_regular,
+              color: colorScheme.primary,
+              size: 32,
+            ),
+            content: Text(
+              context.l10n!.folderRestrictions,
+              style: TextStyle(color: colorScheme.onSurfaceVariant),
+              textAlign: TextAlign.center,
+            ),
+            actionsAlignment: MainAxisAlignment.center,
             actions: <Widget>[
-              TextButton(
-                child: Text(context.l10n!.understand.toUpperCase()),
-                onPressed: () {
-                  Navigator.pop(context);
-                },
+              FilledButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text(context.l10n!.understand),
               ),
             ],
           );

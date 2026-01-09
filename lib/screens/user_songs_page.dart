@@ -1,5 +1,5 @@
 /*
- *     Copyright (C) 2025 Valeri Gokadze
+ *     Copyright (C) 2026 Valeri Gokadze
  *
  *     Musify is free software: you can redistribute it and/or modify
  *     it under the terms of the GNU General Public License as published by
@@ -26,11 +26,12 @@ import 'package:musify/extensions/l10n.dart';
 import 'package:musify/main.dart';
 import 'package:musify/services/data_manager.dart';
 import 'package:musify/services/settings_manager.dart';
+import 'package:musify/utilities/flutter_toast.dart';
 import 'package:musify/utilities/utils.dart';
 import 'package:musify/widgets/playlist_cube.dart';
 import 'package:musify/widgets/playlist_header.dart';
 import 'package:musify/widgets/song_bar.dart';
-import 'package:musify/widgets/sort_button.dart';
+import 'package:musify/widgets/sort_chips.dart';
 
 enum OfflineSortType { default_, title, artist, dateAdded }
 
@@ -45,7 +46,15 @@ class UserSongsPage extends StatefulWidget {
 
 class _UserSongsPageState extends State<UserSongsPage> {
   bool _isEditEnabled = false;
-  late List<dynamic> _originalOfflineSongsList = [];
+  List<dynamic> _originalOfflineSongsList = [];
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.page == 'offline') {
+      _originalOfflineSongsList = List<dynamic>.from(userOfflineSongs);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -55,11 +64,6 @@ class _UserSongsPageState extends State<UserSongsPage> {
     final length = getLength(widget.page);
     final isLikedSongs = title == context.l10n!.likedSongs;
     final isOfflineSongs = title == context.l10n!.offlineSongs;
-
-    // Initialize backup for offline songs on first open
-    if (isOfflineSongs && _originalOfflineSongsList.isEmpty) {
-      _originalOfflineSongsList = List<dynamic>.from(userOfflineSongs);
-    }
 
     return Scaffold(
       appBar: AppBar(
@@ -108,18 +112,13 @@ class _UserSongsPageState extends State<UserSongsPage> {
     return CustomScrollView(
       slivers: [
         SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: buildPlaylistHeader(title, icon, songsList.length),
+          child: _buildHeaderSection(
+            title,
+            icon,
+            songsList.length,
+            isOfflineSongs,
           ),
         ),
-        if (isOfflineSongs)
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 20),
-              child: buildSongActionsRow(),
-            ),
-          ),
         buildSongList(title, songsList, length),
       ],
     );
@@ -161,15 +160,144 @@ class _UserSongsPageState extends State<UserSongsPage> {
     };
   }
 
-  Widget buildPlaylistHeader(String title, IconData icon, int songsLength) {
-    return PlaylistHeader(_buildPlaylistImage(title, icon), title, songsLength);
+  Widget _buildHeaderSection(
+    String title,
+    IconData icon,
+    int songsLength,
+    bool isOfflineSongs,
+  ) {
+    final primaryColor = Theme.of(context).colorScheme.primary;
+    final isRecentlyPlayed = title == context.l10n!.recentlyPlayed;
+
+    return Column(
+      children: [
+        PlaylistHeader(_buildPlaylistImage(title, icon), title, songsLength),
+        Wrap(
+          alignment: WrapAlignment.center,
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            if (songsLength > 0) _buildPlayButton(primaryColor, title),
+            if (isRecentlyPlayed && songsLength > 0)
+              _buildClearRecentsButton(primaryColor),
+          ],
+        ),
+        if (isOfflineSongs && songsLength > 1) ...[
+          const SizedBox(height: 16),
+          SortChips<OfflineSortType>(
+            currentSortType: _getCurrentOfflineSortType(),
+            sortTypes: OfflineSortType.values,
+            sortTypeToString: _getSortTypeDisplayText,
+            onSelected: (type) {
+              setState(() {
+                addOrUpdateData('settings', 'offlineSortType', type.name);
+                offlineSortSetting = type.name;
+              });
+              _sortOfflineSongs(type);
+            },
+          ),
+        ],
+        const SizedBox(height: 8),
+      ],
+    );
   }
 
   Widget _buildPlaylistImage(String title, IconData icon) {
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final isLandscape = screenWidth > MediaQuery.sizeOf(context).height;
     return PlaylistCube(
       {'title': title},
-      size: MediaQuery.sizeOf(context).width / 2.5,
+      size: isLandscape ? 250 : screenWidth / 2.2,
       cubeIcon: icon,
+    );
+  }
+
+  Widget _buildPlayButton(Color primaryColor, String title) {
+    final songsList = getSongsList(widget.page);
+    final playlist = {
+      'ytid': '',
+      'title': title,
+      'source': 'user-created',
+      'list': songsList,
+    };
+
+    return IconButton.filled(
+      icon: Icon(
+        FluentIcons.play_24_filled,
+        color: Theme.of(context).colorScheme.onPrimary,
+      ),
+      iconSize: 24,
+      onPressed: () =>
+          audioHandler.playPlaylistSong(playlist: playlist, songIndex: 0),
+    );
+  }
+
+  Widget _buildClearRecentsButton(Color primaryColor) {
+    return IconButton.filledTonal(
+      icon: Icon(FluentIcons.delete_24_regular, color: primaryColor),
+      iconSize: 24,
+      onPressed: () {
+        final colorScheme = Theme.of(context).colorScheme;
+
+        showDialog(
+          context: context,
+          builder: (BuildContext context) {
+            return AlertDialog(
+              backgroundColor: colorScheme.surface,
+              surfaceTintColor: Colors.transparent,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(28),
+              ),
+              icon: Icon(
+                FluentIcons.delete_24_regular,
+                color: colorScheme.error,
+                size: 32,
+              ),
+              title: Text(
+                context.l10n!.clearRecentlyPlayed,
+                style: TextStyle(
+                  color: colorScheme.onSurface,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              content: Text(
+                context.l10n!.clearRecentlyPlayedQuestion,
+                style: TextStyle(color: colorScheme.onSurfaceVariant),
+                textAlign: TextAlign.center,
+              ),
+              actionsAlignment: MainAxisAlignment.center,
+              actions: [
+                OutlinedButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(color: colorScheme.outline),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: Text(context.l10n!.cancel),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    userRecentlyPlayed.clear();
+                    currentRecentlyPlayedLength.value = 0;
+                    addOrUpdateData('user', 'recentlyPlayedSongs', []);
+                    showToast(context, context.l10n!.recentlyPlayedMsg);
+                  },
+                  style: FilledButton.styleFrom(
+                    backgroundColor: colorScheme.error,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: Text(context.l10n!.clear),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 
@@ -200,7 +328,7 @@ class _UserSongsPageState extends State<UserSongsPage> {
 
               return ReorderableDragStartListener(
                 enabled: _isEditEnabled,
-                key: Key(song['ytid'].toString()),
+                key: ValueKey('${song['ytid']}_$index'),
                 index: index,
                 child: _buildSongBar(
                   song,
@@ -229,7 +357,7 @@ class _UserSongsPageState extends State<UserSongsPage> {
               final borderRadius = getItemBorderRadius(index, songsList.length);
 
               return RepaintBoundary(
-                key: ValueKey('song_${song['ytid']}'),
+                key: ValueKey('song_${song['ytid']}_$index'),
                 child: _buildSongBar(
                   song,
                   index,
@@ -253,41 +381,28 @@ class _UserSongsPageState extends State<UserSongsPage> {
     Map playlist, {
     bool isRecentSong = false,
   }) {
+    final isLikedSongs = playlist['title'] == context.l10n!.likedSongs;
+
     return SongBar(
-      key: Key(song['ytid'].toString()),
+      key: ValueKey('${song['ytid']}_$index'),
       song,
       true,
       onPlay: () {
-        audioHandler.playPlaylistSong(
-          playlist: audioHandler.queue != playlist['list'] ? playlist : null,
-          songIndex: index,
-        );
+        final currentQueue = audioHandler.currentQueue;
+        final isSameQueue =
+            currentQueue.length == playlist['list'].length &&
+            index < currentQueue.length &&
+            currentQueue[index] == song;
+
+        if (isSameQueue) {
+          audioHandler.skipToSong(index);
+        } else {
+          audioHandler.playPlaylistSong(playlist: playlist, songIndex: index);
+        }
       },
       borderRadius: borderRadius,
       isRecentSong: isRecentSong,
-    );
-  }
-
-  Widget buildSongActionsRow() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.end,
-      children: [_buildSortButton()],
-    );
-  }
-
-  Widget _buildSortButton() {
-    return SortButton<OfflineSortType>(
-      currentSortType: _getCurrentOfflineSortType(),
-      sortTypes: OfflineSortType.values,
-      sortTypeToString: _getSortTypeDisplayText,
-      onSelected: (type) {
-        setState(() {
-          addOrUpdateData('settings', 'offlineSortType', type.name);
-          offlineSortSetting = type.name;
-        });
-
-        _sortOfflineSongs(type);
-      },
+      isFromLikedSongs: isLikedSongs,
     );
   }
 

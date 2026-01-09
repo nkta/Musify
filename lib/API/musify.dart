@@ -1,5 +1,5 @@
 /*
- *     Copyright (C) 2025 Valeri Gokadze
+ *     Copyright (C) 2026 Valeri Gokadze
  *
  *     Musify is free software: you can redistribute it and/or modify
  *     it under the terms of the GNU General Public License as published by
@@ -66,7 +66,6 @@ List userRecentlyPlayed = Hive.box(
 List userOfflineSongs = Hive.box(
   'userNoBackup',
 ).get('offlineSongs', defaultValue: []);
-List suggestedPlaylists = [];
 List onlinePlaylists = [];
 
 dynamic nextRecommendedSong;
@@ -102,7 +101,7 @@ Future<List> fetchSongsList(String searchQuery) async {
 
 Future<List> getRecommendedSongs() async {
   try {
-    if (defaultRecommendations.value && userRecentlyPlayed.isNotEmpty) {
+    if (externalRecommendations.value && userRecentlyPlayed.isNotEmpty) {
       return await _getRecommendationsFromRecentlyPlayed();
     } else {
       return await _getRecommendationsFromMixedSources();
@@ -212,12 +211,11 @@ Future<String> addUserPlaylist(String input, BuildContext context) async {
   }
 
   try {
-    final _playlist = await _yt.playlists.get(playlistId);
-
     if (playlistExistsAnywhere(playlistId)) {
       return '${context.l10n!.playlistAlreadyExists}!';
     }
 
+    final _playlist = await _yt.playlists.get(playlistId);
     if (_playlist.title.isEmpty) {
       return '${context.l10n!.invalidYouTubePlaylist}!';
     }
@@ -543,6 +541,66 @@ void moveLikedSong(int oldIndex, int newIndex) {
   addOrUpdateData('user', 'likedSongs', userLikedSongsList);
 }
 
+Future<void> renameSongInLikedSongs(
+  dynamic songId,
+  String newTitle,
+  String newArtist,
+) async {
+  try {
+    final songIndex = userLikedSongsList.indexWhere(
+      (song) => song['ytid'] == songId,
+    );
+
+    if (songIndex != -1) {
+      userLikedSongsList[songIndex]['title'] = newTitle;
+      userLikedSongsList[songIndex]['artist'] = newArtist;
+
+      currentLikedSongsLength.value = userLikedSongsList.length;
+      await addOrUpdateData('user', 'likedSongs', userLikedSongsList);
+    }
+  } catch (e, stackTrace) {
+    logger.log('Error renaming song in liked songs', e, stackTrace);
+    rethrow;
+  }
+}
+
+Future<void> renameSongInPlaylist(
+  dynamic playlistId,
+  dynamic songId,
+  String newTitle,
+  String newArtist,
+) async {
+  try {
+    final playlist = userCustomPlaylists.value.firstWhere(
+      (p) => p['ytid'] == playlistId,
+      orElse: () => <String, dynamic>{},
+    );
+
+    if (playlist.isNotEmpty && playlist['list'] != null) {
+      final songIndex = (playlist['list'] as List).indexWhere(
+        (song) => song['ytid'] == songId,
+      );
+
+      if (songIndex != -1) {
+        (playlist['list'] as List)[songIndex]['title'] = newTitle;
+        (playlist['list'] as List)[songIndex]['artist'] = newArtist;
+
+        // Update the playlist in storage
+        final updatedPlaylists = userCustomPlaylists.value
+            .map((p) => p['ytid'] == playlistId ? playlist : p)
+            .toList();
+        userCustomPlaylists.value = updatedPlaylists;
+
+        // Save to database
+        await addOrUpdateData('user', 'customPlaylists', updatedPlaylists);
+      }
+    }
+  } catch (e, stackTrace) {
+    logger.log('Error renaming song in playlist', e, stackTrace);
+    rethrow;
+  }
+}
+
 Future<void> updatePlaylistLikeStatus(String playlistId, bool add) async {
   try {
     if (add) {
@@ -592,8 +650,7 @@ Future<List> getPlaylists({
   String type = 'all',
 }) async {
   // Early exit if there are no playlists to process.
-  if (playlists.isEmpty ||
-      (playlistsNum == null && query == null && suggestedPlaylists.isEmpty)) {
+  if (playlists.isEmpty || (playlistsNum == null && query == null)) {
     return [];
   }
 
@@ -690,9 +747,7 @@ Future<List> getPlaylists({
   // If a specific number of playlists is requested (without a query),
   // return a shuffled subset of suggested playlists.
   if (playlistsNum != null && query == null) {
-    if (suggestedPlaylists.isEmpty) {
-      suggestedPlaylists = List.from(playlists)..shuffle();
-    }
+    final suggestedPlaylists = List<Map>.from(playlists)..shuffle();
     return suggestedPlaylists.take(playlistsNum).toList();
   }
 
@@ -996,20 +1051,31 @@ Future<String?> getSong(String songId, bool isLive) async {
     );
 
     if (cachedUrl != null && cachedUrl is String && cachedUrl.isNotEmpty) {
-      // Validate cached URL is still working
-      try {
-        final response = await http.head(Uri.parse(cachedUrl));
-        if (response.statusCode >= 200 && response.statusCode < 300) {
-          unawaited(updateRecentlyPlayed(songId));
-          return cachedUrl;
+      // Only validate with HEAD if cache is older than 1 hour
+      final cacheBox = await Hive.openBox('cache');
+      final cacheDate = cacheBox.get('${cacheKey}_date');
+      final now = DateTime.now();
+      final isOld =
+          cacheDate is DateTime &&
+          now.difference(cacheDate) > const Duration(hours: 1);
+      var valid = true;
+      if (isOld) {
+        try {
+          final response = await http.head(Uri.parse(cachedUrl));
+          if (response.statusCode < 200 || response.statusCode >= 300) {
+            valid = false;
+          }
+        } catch (_) {
+          valid = false;
         }
-        // If validation fails, remove from cache
-        await deleteData('cache', cacheKey);
-        await deleteData('cache', '${cacheKey}_date');
-      } catch (_) {
-        // URL validation failed, remove from cache
-        await deleteData('cache', cacheKey);
-        await deleteData('cache', '${cacheKey}_date');
+        if (!valid) {
+          await deleteData('cache', cacheKey);
+          await deleteData('cache', '${cacheKey}_date');
+        }
+      }
+      if (valid) {
+        unawaited(updateRecentlyPlayed(songId));
+        return cachedUrl;
       }
     }
 
@@ -1038,7 +1104,7 @@ Future<String?> getSong(String songId, bool isLive) async {
     unawaited(updateRecentlyPlayed(songId));
     return url;
   } on TimeoutException catch (_) {
-    logger.log('getSongManifest request timed out for $songId', null, null);
+    logger.log('getSong request timed out for $songId', null, null);
     return null;
   } catch (e, stackTrace) {
     logger.log('Error in getSong for songId $songId:', e, stackTrace);
@@ -1260,11 +1326,16 @@ Future<void> updateRecentlyPlayed(dynamic songId) async {
       userRecentlyPlayed.removeLast();
     }
 
-    userRecentlyPlayed.removeWhere((song) => song['ytid'] == songId);
-
-    final newSongDetails = await getSongDetails(0, songId);
-
-    userRecentlyPlayed.insert(0, newSongDetails);
+    final existingIndex = userRecentlyPlayed.indexWhere(
+      (song) => song['ytid'] == songId,
+    );
+    if (existingIndex != -1) {
+      final song = userRecentlyPlayed.removeAt(existingIndex);
+      userRecentlyPlayed.insert(0, song);
+    } else {
+      final newSongDetails = await getSongDetails(0, songId);
+      userRecentlyPlayed.insert(0, newSongDetails);
+    }
     currentRecentlyPlayedLength.value = userRecentlyPlayed.length;
     await addOrUpdateData('user', 'recentlyPlayedSongs', userRecentlyPlayed);
   } catch (e, stackTrace) {

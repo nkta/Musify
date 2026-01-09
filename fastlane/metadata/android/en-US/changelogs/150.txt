@@ -1,7 +1,6 @@
 Bug fixes
-- Fixed playlist opening issues
-- Fixed sorting logic
+- Fixed respnsiveness issue for now playing page
 
 Enhancements
-- Improved player logic
+- Updated translations
 - Full changelog: https://github.com/gokadzev/Musify/releases

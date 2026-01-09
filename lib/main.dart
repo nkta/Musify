@@ -1,5 +1,5 @@
 /*
- *     Copyright (C) 2025 Valeri Gokadze
+ *     Copyright (C) 2026 Valeri Gokadze
  *
  *     Musify is free software: you can redistribute it and/or modify
  *     it under the terms of the GNU General Public License as published by
@@ -153,7 +153,7 @@ class _MusifyState extends State<Musify> {
       }
     };
 
-    offlineModeChangeNotifier.addListener(_onOfflineModeChanged);
+    offlineMode.addListener(_onOfflineModeChanged);
 
     try {
       LicenseRegistry.addLicense(() async* {
@@ -182,6 +182,12 @@ class _MusifyState extends State<Musify> {
           SchedulerBinding.instance.addPostFrameCallback((_) {
             showUpdateCheckDialog(NavigationManager().context);
           });
+        } else {
+          SchedulerBinding.instance.addPostFrameCallback((_) async {
+            if (!offlineMode.value) {
+              await fetchAnnouncementOnly();
+            }
+          });
         }
       }
     }
@@ -189,44 +195,10 @@ class _MusifyState extends State<Musify> {
 
   @override
   void dispose() {
-    offlineModeChangeNotifier.removeListener(_onOfflineModeChanged);
+    offlineMode.removeListener(_onOfflineModeChanged);
 
     Hive.close();
     super.dispose();
-  }
-
-  void showUpdateCheckDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: Text(context.l10n!.checkForUpdates),
-          content: Text(context.l10n!.enableUpdateChecksDescription),
-          actions: [
-            TextButton(
-              onPressed: () {
-                shouldWeCheckUpdates.value = false;
-                addOrUpdateData('settings', 'shouldWeCheckUpdates', false);
-                Navigator.of(context).pop();
-              },
-              child: Text(context.l10n!.no),
-            ),
-            TextButton(
-              onPressed: () {
-                shouldWeCheckUpdates.value = true;
-                addOrUpdateData('settings', 'shouldWeCheckUpdates', true);
-                if (!isFdroidBuild && kReleaseMode && !offlineMode.value) {
-                  checkAppUpdates();
-                  isUpdateChecked = true;
-                }
-                Navigator.of(context).pop();
-              },
-              child: Text(context.l10n!.yes),
-            ),
-          ],
-        );
-      },
-    );
   }
 
   void _onOfflineModeChanged() {
@@ -304,11 +276,6 @@ Future<void> initialisation() async {
         androidNotificationIcon: 'drawable/ic_launcher_foreground',
         androidShowNotificationBadge: true,
         androidStopForegroundOnPause: false,
-        androidBrowsableRootExtras: {
-          'android.media.browse.CONTENT_STYLE_SUPPORTED': true,
-          'android.media.browse.CONTENT_STYLE_BROWSABLE_HINT': 1,
-          'android.media.browse.CONTENT_STYLE_PLAYABLE_HINT': 1,
-        },
       ),
     );
 

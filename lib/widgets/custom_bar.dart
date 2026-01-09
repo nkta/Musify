@@ -1,5 +1,5 @@
 /*
- *     Copyright (C) 2025 Valeri Gokadze
+ *     Copyright (C) 2026 Valeri Gokadze
  *
  *     Musify is free software: you can redistribute it and/or modify
  *     it under the terms of the GNU General Public License as published by
@@ -65,7 +65,17 @@ class CustomBar extends StatelessWidget {
             onLongPress: onLongPress,
             child: ListTile(
               minTileHeight: 45,
-              leading: Icon(tileIcon, color: iconColor),
+              leading: Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.onSurface.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(tileIcon, size: 22),
+              ),
               title: Text(
                 tileName,
                 style: TextStyle(fontWeight: FontWeight.w600, color: textColor),

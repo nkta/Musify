@@ -1,5 +1,5 @@
 /*
- *     Copyright (C) 2025 Valeri Gokadze
+ *     Copyright (C) 2026 Valeri Gokadze
  *
  *     Musify is free software: you can redistribute it and/or modify
  *     it under the terms of the GNU General Public License as published by
@@ -136,7 +136,7 @@ class _BottomNavigationPageState extends State<BottomNavigationPage> {
         selectedIcon: FluentIcons.home_24_filled,
         label: context.l10n?.home ?? 'Home',
         route: '/home',
-        index: 0,
+        shellIndex: 0,
       ),
     ];
 
@@ -148,14 +148,10 @@ class _BottomNavigationPageState extends State<BottomNavigationPage> {
           selectedIcon: FluentIcons.search_24_filled,
           label: context.l10n?.search ?? 'Search',
           route: '/search',
-          index: 1,
+          shellIndex: 1,
         ),
       );
     }
-
-    // Adjust indices based on whether search is included
-    final libraryIndex = isOfflineMode ? 1 : 2;
-    final settingsIndex = isOfflineMode ? 2 : 3;
 
     items.addAll([
       _NavigationItem(
@@ -163,14 +159,14 @@ class _BottomNavigationPageState extends State<BottomNavigationPage> {
         selectedIcon: FluentIcons.book_24_filled,
         label: context.l10n?.library ?? 'Library',
         route: '/library',
-        index: libraryIndex,
+        shellIndex: 2,
       ),
       _NavigationItem(
         icon: FluentIcons.settings_24_regular,
         selectedIcon: FluentIcons.settings_24_filled,
         label: context.l10n?.settings ?? 'Settings',
         route: '/settings',
-        index: settingsIndex,
+        shellIndex: 3,
       ),
     ]);
 
@@ -198,30 +194,22 @@ class _BottomNavigationPageState extends State<BottomNavigationPage> {
   }
 
   int _getCurrentIndex(List<_NavigationItem> items, bool isOfflineMode) {
-    final currentIndex = widget.child.currentIndex;
+    final currentShellIndex = widget.child.currentIndex;
 
-    // Add bounds checking
-    if (currentIndex < 0 || items.isEmpty) {
-      return 0;
-    }
+    if (items.isEmpty) return 0;
 
-    // Map shell index to navigation items index
-    for (var i = 0; i < items.length; i++) {
-      if (items[i].shellIndex == currentIndex) {
-        return i;
-      }
-    }
+    // Try to find the current shell index in the available items
+    final matchedIndex = items.indexWhere(
+      (item) => item.shellIndex == currentShellIndex,
+    );
+    if (matchedIndex != -1) return matchedIndex;
 
-    // Handle edge cases more robustly
-    if (isOfflineMode && currentIndex == 1) {
-      return 0; // Search -> Home
-    }
+    // If the Search branch (1) is active but Search is hidden in offline mode,
+    // fall back to the Home tab.
+    if (isOfflineMode && currentShellIndex == 1) return 0;
 
-    if (isOfflineMode && currentIndex > 1) {
-      return (currentIndex - 1).clamp(0, items.length - 1);
-    }
-
-    return currentIndex.clamp(0, items.length - 1);
+    // Final fallback: return the first tab to keep UI in a valid state.
+    return 0;
   }
 }
 
@@ -231,21 +219,12 @@ class _NavigationItem {
     required this.selectedIcon,
     required this.label,
     required this.route,
-    required this.index,
+    required this.shellIndex,
   });
 
   final IconData icon;
   final IconData selectedIcon;
   final String label;
   final String route;
-  final int index;
-
-  // Shell index maps to the actual StatefulShellRoute branch index
-  int get shellIndex {
-    if (route == '/home') return 0;
-    if (route == '/search') return 1;
-    if (route == '/library') return 2;
-    if (route == '/settings') return 3;
-    return 0;
-  }
+  final int shellIndex;
 }

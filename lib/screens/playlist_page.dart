@@ -1,5 +1,5 @@
 /*
- *     Copyright (C) 2025 Valeri Gokadze
+ *     Copyright (C) 2026 Valeri Gokadze
  *
  *     Musify is free software: you can redistribute it and/or modify
  *     it under the terms of the GNU General Public License as published by
@@ -35,13 +35,13 @@ import 'package:musify/services/playlist_sharing.dart';
 import 'package:musify/services/settings_manager.dart';
 import 'package:musify/utilities/common_variables.dart';
 import 'package:musify/utilities/flutter_toast.dart';
-import 'package:musify/utilities/playlist_image_picker.dart';
 import 'package:musify/utilities/sort_utils.dart';
 import 'package:musify/utilities/utils.dart';
+import 'package:musify/widgets/edit_playlist_dialog.dart';
 import 'package:musify/widgets/playlist_cube.dart';
 import 'package:musify/widgets/playlist_header.dart';
 import 'package:musify/widgets/song_bar.dart';
-import 'package:musify/widgets/sort_button.dart';
+import 'package:musify/widgets/sort_chips.dart';
 import 'package:musify/widgets/spinner.dart';
 
 enum PlaylistSortType { default_, title, artist }
@@ -173,61 +173,16 @@ class _PlaylistPageState extends State<PlaylistPage> {
           onPressed: () =>
               Navigator.pop(context, widget.playlistData == _playlist),
         ),
-        actions: [
-          if (widget.playlistId != null) ...[_buildLikeButton()],
-          const SizedBox(width: 10),
-          if (_playlist != null) ...[
-            _buildSyncButton(),
-            const SizedBox(width: 10),
-            _buildDownloadButton(),
-            const SizedBox(width: 10),
-            if (_playlist['source'] == 'user-created')
-              IconButton(
-                icon: const Icon(FluentIcons.share_24_regular),
-                onPressed: () async {
-                  final encodedPlaylist = PlaylistSharingService.encodePlaylist(
-                    _playlist,
-                  );
-
-                  final url = 'musify://playlist/custom/$encodedPlaylist';
-                  await Clipboard.setData(ClipboardData(text: url));
-                },
-              ),
-            const SizedBox(width: 10),
-          ],
-          if (_playlist != null && _playlist['source'] == 'user-created') ...[
-            _buildEditButton(),
-            const SizedBox(width: 10),
-          ],
-        ],
       ),
       body: _playlist != null
           ? PagingListener(
               controller: _pagingController,
               builder: (context, state, fetchNextPage) => CustomScrollView(
                 slivers: [
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: buildPlaylistHeader(),
-                    ),
-                  ),
+                  SliverToBoxAdapter(child: _buildHeaderSection()),
                   if (_playlist['list'].isNotEmpty) ...[
-                    SliverToBoxAdapter(
-                      child: Padding(
-                        padding: const EdgeInsets.only(
-                          top: 15,
-                          bottom: 20,
-                          right: 20,
-                        ),
-                        child: Align(
-                          alignment: Alignment.centerRight,
-                          child: _buildSortSongActionButton(),
-                        ),
-                      ),
-                    ),
                     SliverPadding(
-                      padding: commonListViewBottmomPadding,
+                      padding: commonListViewBottomPadding,
                       sliver: PagedSliverList(
                         state: state,
                         fetchNextPage: fetchNextPage,
@@ -257,13 +212,17 @@ class _PlaylistPageState extends State<PlaylistPage> {
     final isLandscape = screenWidth > MediaQuery.sizeOf(context).height;
     return PlaylistCube(
       _playlist,
-      size: isLandscape ? 300 : screenWidth / 2.5,
+      size: isLandscape ? 250 : screenWidth / 2.2,
       cubeIcon: widget.cubeIcon,
     );
   }
 
-  Widget buildPlaylistHeader() {
+  Widget _buildHeaderSection() {
     final songsLength = (_playlist['list'] as List<dynamic>).length;
+    final isUserCreated = _playlist['source'] == 'user-created';
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final primaryColor = colorScheme.primary;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -271,171 +230,152 @@ class _PlaylistPageState extends State<PlaylistPage> {
         PlaylistHeader(_buildPlaylistImage(), _playlist['title'], songsLength),
         const SizedBox(height: 16),
         _buildHeaderActions(),
+        const SizedBox(height: 8),
+        Wrap(
+          alignment: WrapAlignment.center,
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            if (widget.playlistId != null && !isUserCreated)
+              _buildLikeButton(primaryColor),
+            _buildSyncButton(primaryColor),
+            _buildDownloadButton(),
+            if (isUserCreated) ...[
+              _buildShareButton(primaryColor),
+              _buildEditButton(primaryColor),
+            ],
+          ],
+        ),
+        if (songsLength > 1) ...[
+          const SizedBox(height: 16),
+          SortChips<PlaylistSortType>(
+            currentSortType: _sortType,
+            sortTypes: PlaylistSortType.values,
+            sortTypeToString: _getSortTypeDisplayText,
+            onSelected: (type) {
+              setState(() {
+                _sortType = type;
+                addOrUpdateData('settings', 'playlistSortType', type.name);
+                playlistSortSetting = type.name;
+                _sortPlaylist(type);
+              });
+              _pagingController.refresh();
+            },
+          ),
+        ],
+        const SizedBox(height: 8),
       ],
     );
   }
 
-  Widget _buildLikeButton() {
-    return ValueListenableBuilder<bool>(
-      valueListenable: playlistLikeStatus,
-      builder: (_, value, __) {
-        return IconButton(
-          splashColor: Colors.transparent,
-          highlightColor: Colors.transparent,
-          icon: value
-              ? const Icon(FluentIcons.heart_24_filled)
-              : const Icon(FluentIcons.heart_24_regular),
-          iconSize: 26,
-          onPressed: () {
-            playlistLikeStatus.value = !playlistLikeStatus.value;
-            updatePlaylistLikeStatus(
-              _playlist['ytid'],
-              playlistLikeStatus.value,
-            );
-            currentLikedPlaylistsLength.value = value
-                ? currentLikedPlaylistsLength.value + 1
-                : currentLikedPlaylistsLength.value - 1;
-          },
+  Widget _buildPlayButton(Color primaryColor) {
+    return IconButton.filled(
+      icon: Icon(
+        FluentIcons.play_24_filled,
+        color: Theme.of(context).colorScheme.onPrimary,
+      ),
+      iconSize: 24,
+      onPressed: () =>
+          audioHandler.playPlaylistSong(playlist: _playlist, songIndex: 0),
+    );
+  }
+
+  Widget _buildShareButton(Color primaryColor) {
+    return IconButton.filledTonal(
+      icon: Icon(FluentIcons.share_24_regular, color: primaryColor),
+      iconSize: 24,
+      onPressed: () async {
+        final encodedPlaylist = PlaylistSharingService.encodePlaylist(
+          _playlist,
         );
+        final url = 'musify://playlist/custom/$encodedPlaylist';
+        await Clipboard.setData(ClipboardData(text: url));
       },
     );
   }
 
-  Widget _buildSyncButton() {
-    return IconButton(
-      splashColor: Colors.transparent,
-      highlightColor: Colors.transparent,
-      icon: const Icon(FluentIcons.arrow_sync_24_filled),
-      iconSize: 26,
+  Widget _buildLikeButton(Color primaryColor) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: playlistLikeStatus,
+      builder: (_, value, __) {
+        final icon = value
+            ? FluentIcons.heart_24_filled
+            : FluentIcons.heart_24_regular;
+
+        return value
+            ? IconButton.filled(
+                icon: Icon(
+                  icon,
+                  color: Theme.of(context).colorScheme.onPrimary,
+                ),
+                iconSize: 24,
+                onPressed: () {
+                  playlistLikeStatus.value = !playlistLikeStatus.value;
+                  updatePlaylistLikeStatus(
+                    _playlist['ytid'],
+                    playlistLikeStatus.value,
+                  );
+                  currentLikedPlaylistsLength.value =
+                      currentLikedPlaylistsLength.value - 1;
+                },
+              )
+            : IconButton.filledTonal(
+                icon: Icon(icon, color: primaryColor),
+                iconSize: 24,
+                onPressed: () {
+                  playlistLikeStatus.value = !playlistLikeStatus.value;
+                  updatePlaylistLikeStatus(
+                    _playlist['ytid'],
+                    playlistLikeStatus.value,
+                  );
+                  currentLikedPlaylistsLength.value =
+                      currentLikedPlaylistsLength.value + 1;
+                },
+              );
+      },
+    );
+  }
+
+  Widget _buildSyncButton(Color primaryColor) {
+    return IconButton.filledTonal(
+      icon: Icon(FluentIcons.arrow_sync_24_filled, color: primaryColor),
+      iconSize: 24,
       onPressed: _handleSyncPlaylist,
     );
   }
 
-  Widget _buildEditButton() {
-    return IconButton(
-      splashColor: Colors.transparent,
-      highlightColor: Colors.transparent,
-      icon: const Icon(FluentIcons.edit_24_filled),
-      iconSize: 26,
-      onPressed: () => showDialog(
-        context: context,
-        builder: (BuildContext context) {
-          String customPlaylistName = _playlist['title'];
-          String? imageUrl = _playlist['image'];
-          var imageBase64 = (imageUrl != null && imageUrl.startsWith('data:'))
-              ? imageUrl
-              : null;
-          if (imageBase64 != null) imageUrl = null;
+  Widget _buildEditButton(Color primaryColor) {
+    return IconButton.filledTonal(
+      icon: Icon(FluentIcons.edit_24_filled, color: primaryColor),
+      iconSize: 24,
+      onPressed: () async {
+        final result = await showDialog<Map?>(
+          context: context,
+          builder: (context) => EditPlaylistDialog(playlistData: _playlist),
+        );
 
-          return StatefulBuilder(
-            builder: (context, dialogSetState) {
-              Future<void> _pickImage() async {
-                final result = await pickImage();
-                if (result != null) {
-                  dialogSetState(() {
-                    imageBase64 = result;
-                    imageUrl = null;
-                  });
-                }
-              }
-
-              Widget _imagePreview() {
-                return buildImagePreview(
-                  imageBase64: imageBase64,
-                  imageUrl: imageUrl,
-                );
-              }
-
-              return AlertDialog(
-                content: SingleChildScrollView(
-                  child: Column(
-                    children: <Widget>[
-                      const SizedBox(height: 7),
-                      TextField(
-                        controller: TextEditingController(
-                          text: customPlaylistName,
-                        ),
-                        decoration: InputDecoration(
-                          labelText: context.l10n!.customPlaylistName,
-                        ),
-                        onChanged: (value) {
-                          customPlaylistName = value;
-                        },
-                      ),
-                      if (imageBase64 == null) ...[
-                        const SizedBox(height: 7),
-                        TextField(
-                          controller: TextEditingController(text: imageUrl),
-                          decoration: InputDecoration(
-                            labelText: context.l10n!.customPlaylistImgUrl,
-                          ),
-                          onChanged: (value) {
-                            imageUrl = value;
-                            imageBase64 = null;
-                            dialogSetState(() {});
-                          },
-                        ),
-                      ],
-                      const SizedBox(height: 7),
-                      if (imageUrl == null) ...[
-                        buildImagePickerRow(
-                          context,
-                          _pickImage,
-                          imageBase64 != null,
-                        ),
-                        _imagePreview(),
-                      ],
-                    ],
-                  ),
-                ),
-                actions: <Widget>[
-                  TextButton(
-                    child: Text(context.l10n!.update.toUpperCase()),
-                    onPressed: () {
-                      final index = userCustomPlaylists.value.indexOf(
-                        widget.playlistData,
-                      );
-
-                      if (index != -1) {
-                        final newPlaylist = {
-                          'title': customPlaylistName,
-                          'source': 'user-created',
-                          if (imageBase64 != null)
-                            'image': imageBase64
-                          else if (imageUrl != null)
-                            'image': imageUrl,
-                          'list': widget.playlistData['list'],
-                        };
-                        final updatedPlaylists = List<Map>.from(
-                          userCustomPlaylists.value,
-                        );
-                        updatedPlaylists[index] = newPlaylist;
-                        userCustomPlaylists.value = updatedPlaylists;
-                        addOrUpdateData(
-                          'user',
-                          'customPlaylists',
-                          userCustomPlaylists.value,
-                        );
-                        setState(() {
-                          _playlist = newPlaylist;
-                        });
-                        showToast(context, context.l10n!.playlistUpdated);
-                      }
-
-                      Navigator.pop(context);
-                    },
-                  ),
-                ],
-              );
-            },
-          );
-        },
-      ),
+        if (result != null) {
+          final index = userCustomPlaylists.value.indexOf(widget.playlistData);
+          if (index != -1) {
+            final updatedPlaylists = List<Map>.from(userCustomPlaylists.value);
+            updatedPlaylists[index] = result;
+            userCustomPlaylists.value = updatedPlaylists;
+            await addOrUpdateData(
+              'user',
+              'customPlaylists',
+              userCustomPlaylists.value,
+            );
+            setState(() => _playlist = result);
+            showToast(context, context.l10n!.playlistUpdated);
+          }
+        }
+      },
     );
   }
 
   Widget _buildDownloadButton() {
     final playlistId = widget.playlistId ?? _playlist['title'];
+    final primaryColor = Theme.of(context).colorScheme.primary;
 
     return ValueListenableBuilder<List<dynamic>>(
       valueListenable: offlinePlaylistService.offlinePlaylists,
@@ -445,11 +385,12 @@ class _PlaylistPageState extends State<PlaylistPage> {
         );
 
         if (playlistOfflineStatus) {
-          return IconButton(
-            splashColor: Colors.transparent,
-            highlightColor: Colors.transparent,
-            icon: const Icon(FluentIcons.arrow_download_off_24_filled),
-            iconSize: 26,
+          return IconButton.filled(
+            icon: Icon(
+              FluentIcons.arrow_download_off_24_filled,
+              color: Theme.of(context).colorScheme.onPrimary,
+            ),
+            iconSize: 24,
             onPressed: () => _showRemoveOfflineDialog(playlistId),
             tooltip: context.l10n!.removeOffline,
           );
@@ -465,37 +406,45 @@ class _PlaylistPageState extends State<PlaylistPage> {
             );
 
             if (isDownloading) {
-              return Stack(
-                alignment: Alignment.center,
-                children: [
-                  CircularProgressIndicator(
-                    value: progress.progress,
-                    strokeWidth: 2,
-                    backgroundColor: Colors.grey.withValues(alpha: .3),
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      Theme.of(context).colorScheme.primary,
+              return SizedBox(
+                width: 48,
+                height: 48,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    SizedBox(
+                      width: 40,
+                      height: 40,
+                      child: CircularProgressIndicator(
+                        value: progress.progress,
+                        strokeWidth: 3,
+                        backgroundColor: primaryColor.withValues(alpha: .2),
+                        valueColor: AlwaysStoppedAnimation<Color>(primaryColor),
+                      ),
                     ),
-                  ),
-                  IconButton(
-                    splashColor: Colors.transparent,
-                    highlightColor: Colors.transparent,
-                    icon: const Icon(FluentIcons.dismiss_24_filled),
-                    iconSize: 14,
-                    onPressed: () => offlinePlaylistService.cancelDownload(
-                      context,
-                      playlistId,
+                    IconButton(
+                      icon: Icon(
+                        FluentIcons.dismiss_24_filled,
+                        color: primaryColor,
+                        size: 16,
+                      ),
+                      onPressed: () => offlinePlaylistService.cancelDownload(
+                        context,
+                        playlistId,
+                      ),
+                      tooltip: context.l10n!.cancel,
                     ),
-                    tooltip: context.l10n!.cancel,
-                  ),
-                ],
+                  ],
+                ),
               );
             }
 
-            return IconButton(
-              splashColor: Colors.transparent,
-              highlightColor: Colors.transparent,
-              icon: const Icon(FluentIcons.arrow_download_24_filled),
-              iconSize: 26,
+            return IconButton.filledTonal(
+              icon: Icon(
+                FluentIcons.arrow_download_24_filled,
+                color: primaryColor,
+              ),
+              iconSize: 24,
               onPressed: () =>
                   offlinePlaylistService.downloadPlaylist(context, _playlist),
               tooltip: context.l10n!.downloadPlaylist,
@@ -507,24 +456,59 @@ class _PlaylistPageState extends State<PlaylistPage> {
   }
 
   void _showRemoveOfflineDialog(String playlistId) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     showDialog(
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: Text(context.l10n!.removeOfflinePlaylist),
-          content: Text(context.l10n!.removeOfflinePlaylistConfirm),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text(context.l10n!.cancel.toUpperCase()),
+          backgroundColor: colorScheme.surface,
+          surfaceTintColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(28),
+          ),
+          icon: Icon(
+            FluentIcons.cloud_off_24_regular,
+            color: colorScheme.error,
+            size: 32,
+          ),
+          title: Text(
+            context.l10n!.removeOfflinePlaylist,
+            style: TextStyle(
+              color: colorScheme.onSurface,
+              fontWeight: FontWeight.w600,
             ),
-            TextButton(
+          ),
+          content: Text(
+            context.l10n!.removeOfflinePlaylistConfirm,
+            style: TextStyle(color: colorScheme.onSurfaceVariant),
+            textAlign: TextAlign.center,
+          ),
+          actionsAlignment: MainAxisAlignment.center,
+          actions: [
+            OutlinedButton(
+              onPressed: () => Navigator.pop(context),
+              style: OutlinedButton.styleFrom(
+                side: BorderSide(color: colorScheme.outline),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: Text(context.l10n!.cancel),
+            ),
+            FilledButton(
               onPressed: () {
                 offlinePlaylistService.removeOfflinePlaylist(playlistId);
                 Navigator.pop(context);
                 showToast(context, context.l10n!.playlistRemovedFromOffline);
               },
-              child: Text(context.l10n!.remove.toUpperCase()),
+              style: FilledButton.styleFrom(
+                backgroundColor: colorScheme.error,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: Text(context.l10n!.remove),
             ),
           ],
         );
@@ -552,20 +536,29 @@ class _PlaylistPageState extends State<PlaylistPage> {
     if (indexOfRemovedSong >= items.length) return;
 
     final dynamic songToRemove = items[indexOfRemovedSong];
-    showToastWithButton(
-      context,
-      context.l10n!.songRemoved,
-      context.l10n!.undo.toUpperCase(),
-      () {
-        addSongInCustomPlaylist(
-          context,
-          _playlist['title'],
-          songToRemove,
-          indexToInsert: indexOfRemovedSong,
-        );
-        _pagingController.refresh();
-      },
-    );
+    final playlistTitle = _playlist['title'];
+    if (mounted) {
+      showToastWithButton(
+        context,
+        context.l10n!.songRemoved,
+        context.l10n!.undo.toUpperCase(),
+        () {
+          addSongInCustomPlaylist(
+            context,
+            playlistTitle,
+            songToRemove,
+            indexToInsert: indexOfRemovedSong,
+          );
+          _pagingController.refresh();
+        },
+      );
+    } else {
+      logger.log(
+        '(_updateSongsListOnRemove): Widget not mounted, cannot show undo toast.',
+        null,
+        null,
+      );
+    }
 
     _pagingController.refresh();
   }
@@ -579,25 +572,6 @@ class _PlaylistPageState extends State<PlaylistPage> {
       case PlaylistSortType.artist:
         return context.l10n!.artist;
     }
-  }
-
-  Widget _buildSortSongActionButton() {
-    return SortButton<PlaylistSortType>(
-      currentSortType: _sortType,
-      sortTypes: PlaylistSortType.values,
-      sortTypeToString: _getSortTypeDisplayText,
-      onSelected: (type) {
-        setState(() {
-          _sortType = type;
-          addOrUpdateData('settings', 'playlistSortType', type.name);
-          playlistSortSetting = type.name;
-          _sortPlaylist(type);
-        });
-
-        // Refresh pagination inside setState ensures UI updates properly
-        _pagingController.refresh();
-      },
-    );
   }
 
   void _sortPlaylist(PlaylistSortType type) {
@@ -628,6 +602,8 @@ class _PlaylistPageState extends State<PlaylistPage> {
     final items = _pagingController.items ?? [];
     final totalItems = items.length;
     final borderRadius = getItemBorderRadius(index, totalItems);
+    final isUserCreatedPlaylist = _playlist?['source'] == 'user-created';
+    final playlistId = isUserCreatedPlaylist ? _playlist!['ytid'] : null;
 
     return SongBar(
       song,
@@ -646,6 +622,8 @@ class _PlaylistPageState extends State<PlaylistPage> {
         audioHandler.playPlaylistSong(playlist: _playlist, songIndex: index),
       },
       borderRadius: borderRadius,
+      playlistId: playlistId,
+      onRenamed: () => setState(() {}),
     );
   }
 

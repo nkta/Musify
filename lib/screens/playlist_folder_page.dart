@@ -1,5 +1,5 @@
 /*
- *     Copyright (C) 2025 Valeri Gokadze
+ *     Copyright (C) 2026 Valeri Gokadze
  *
  *     Musify is free software: you can redistribute it and/or modify
  *     it under the terms of the GNU General Public License as published by
@@ -140,7 +140,7 @@ class _PlaylistFolderPageState extends State<PlaylistFolderPage> {
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       itemCount: _playlists.length,
-      padding: commonListViewBottmomPadding,
+      padding: commonListViewBottomPadding,
       itemBuilder: (context, index) {
         final playlist = _playlists[index];
         final borderRadius = getItemBorderRadius(index, _playlists.length);

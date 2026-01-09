@@ -1,5 +1,5 @@
 /*
- *     Copyright (C) 2025 Valeri Gokadze
+ *     Copyright (C) 2026 Valeri Gokadze
  *
  *     Musify is free software: you can redistribute it and/or modify
  *     it under the terms of the GNU General Public License as published by
@@ -29,6 +29,7 @@ import 'package:musify/main.dart';
 import 'package:musify/screens/playlist_page.dart';
 import 'package:musify/screens/search_page.dart';
 import 'package:musify/services/settings_manager.dart';
+import 'package:musify/utilities/async_loader.dart';
 import 'package:musify/utilities/common_variables.dart';
 import 'package:musify/utilities/utils.dart';
 import 'package:musify/widgets/announcement_box.dart';
@@ -36,7 +37,7 @@ import 'package:musify/widgets/playlist_cube.dart';
 import 'package:musify/widgets/section_header.dart';
 import 'package:musify/widgets/song_bar.dart';
 import 'package:musify/widgets/spinner.dart';
-import 'package:flutter_share_receiver/flutter_share_receiver.dart';
+import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -135,10 +136,6 @@ class _HomePageState extends State<HomePage> {
 
                 return AnnouncementBox(
                   message: context.l10n!.newAnnouncement,
-                  backgroundColor: Theme.of(
-                    context,
-                  ).colorScheme.secondaryContainer,
-                  textColor: Theme.of(context).colorScheme.onSecondaryContainer,
                   url: _url,
                   onDismiss: () async {
                     announcementURL.value = null;
@@ -148,26 +145,8 @@ class _HomePageState extends State<HomePage> {
             ),
             _buildSuggestedPlaylists(playlistHeight),
             _buildSuggestedPlaylists(playlistHeight, showOnlyLiked: true),
-            _buildRecommendedSongsSection(playlistHeight),
+            _buildRecommendedSongsSection(),
           ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildLoadingWidget() {
-    return const Center(
-      child: Padding(padding: EdgeInsets.all(35), child: Spinner()),
-    );
-  }
-
-  Widget _buildErrorWidget(BuildContext context) {
-    return Center(
-      child: Text(
-        '${context.l10n!.error}!',
-        style: TextStyle(
-          color: Theme.of(context).colorScheme.primary,
-          fontSize: 18,
         ),
       ),
     );
@@ -180,32 +159,24 @@ class _HomePageState extends State<HomePage> {
     final sectionTitle = showOnlyLiked
         ? context.l10n!.backToFavorites
         : context.l10n!.suggestedPlaylists;
-    return FutureBuilder<List<dynamic>>(
+    return AsyncLoader<List<dynamic>>(
       future: getPlaylists(
         playlistsNum: recommendedCubesNumber,
         onlyLiked: showOnlyLiked,
       ),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return _buildLoadingWidget();
-        } else if (snapshot.hasError) {
-          logger.log(
-            'Error in _buildSuggestedPlaylists',
-            snapshot.error,
-            snapshot.stackTrace,
-          );
-          return _buildErrorWidget(context);
-        } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
-          return const SizedBox.shrink();
-        }
 
-        final playlists = snapshot.data ?? [];
+      builder: (context, playlists) {
         final itemsNumber = playlists.length.clamp(0, recommendedCubesNumber);
         final isLargeScreen = MediaQuery.of(context).size.width > 480;
 
         return Column(
           children: [
-            SectionHeader(title: sectionTitle),
+            SectionHeader(
+              title: sectionTitle,
+              icon: showOnlyLiked
+                  ? FluentIcons.heart_24_filled
+                  : FluentIcons.list_24_filled,
+            ),
             ConstrainedBox(
               constraints: BoxConstraints(maxHeight: playlistHeight),
               child: isLargeScreen
@@ -266,37 +237,15 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildRecommendedSongsSection(double playlistHeight) {
+  Widget _buildRecommendedSongsSection() {
     return ValueListenableBuilder<bool>(
-      valueListenable: defaultRecommendations,
+      valueListenable: externalRecommendations,
       builder: (_, recommendations, __) {
-        return FutureBuilder<dynamic>(
+        return AsyncLoader<List<dynamic>>(
           future: getRecommendedSongs(),
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return _buildLoadingWidget();
-            }
 
-            if (snapshot.connectionState != ConnectionState.done) {
-              return const SizedBox.shrink();
-            }
-
-            if (snapshot.hasError) {
-              logger.log(
-                'Error in _buildRecommendedSongsSection',
-                snapshot.error,
-                snapshot.stackTrace,
-              );
-              return _buildErrorWidget(context);
-            }
-
-            if (!snapshot.hasData) {
-              return const SizedBox.shrink();
-            }
-
-            final data = snapshot.data as List<dynamic>;
+          builder: (context, data) {
             if (data.isEmpty) return const SizedBox.shrink();
-
             return _buildRecommendedForYouSection(context, data);
           },
         );
@@ -308,20 +257,18 @@ class _HomePageState extends State<HomePage> {
     BuildContext context,
     List<dynamic> data,
   ) {
+    final recommendedTitle = context.l10n!.recommendedForYou;
+
     return Column(
       children: [
         SectionHeader(
-          title: context.l10n!.recommendedForYou,
+          title: recommendedTitle,
+          icon: FluentIcons.sparkle_24_filled,
           actionButton: IconButton(
             onPressed: () async {
-              await Future.microtask(
-                () => audioHandler.playPlaylistSong(
-                  playlist: {
-                    'title': context.l10n!.recommendedForYou,
-                    'list': data,
-                  },
-                  songIndex: 0,
-                ),
+              await audioHandler.playPlaylistSong(
+                playlist: {'title': recommendedTitle, 'list': data},
+                songIndex: 0,
               );
             },
             icon: Icon(
@@ -335,7 +282,7 @@ class _HomePageState extends State<HomePage> {
           shrinkWrap: true,
           physics: const BouncingScrollPhysics(),
           itemCount: data.length,
-          padding: commonListViewBottmomPadding,
+          padding: commonListViewBottomPadding,
           itemBuilder: (context, index) {
             final borderRadius = getItemBorderRadius(index, data.length);
             return RepaintBoundary(
