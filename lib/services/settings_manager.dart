@@ -24,7 +24,7 @@ import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:musify/screens/playlist_page.dart';
 import 'package:musify/screens/user_songs_page.dart';
-import 'package:musify/utilities/utils.dart';
+import 'package:musify/utilities/language_utils.dart';
 
 // Preferences
 
@@ -49,7 +49,7 @@ final offlineMode = ValueNotifier<bool>(
 );
 
 final predictiveBack = ValueNotifier<bool>(
-  Hive.box('settings').get('predictiveBack', defaultValue: false),
+  Hive.box('settings').get('predictiveBack', defaultValue: true),
 );
 
 final sponsorBlockSupport = ValueNotifier<bool>(
@@ -68,8 +68,26 @@ final audioQualitySetting = ValueNotifier<String>(
   Hive.box('settings').get('audioQuality', defaultValue: 'high'),
 );
 
+List<double> _readEqualizerGains() {
+  final raw = Hive.box(
+    'settings',
+  ).get('equalizerBandGains', defaultValue: const <dynamic>[]);
+
+  if (raw is List) {
+    return raw.map((value) => value is num ? value.toDouble() : 0.0).toList();
+  }
+
+  return <double>[];
+}
+
+final equalizerEnabled = ValueNotifier<bool>(
+  Hive.box('settings').get('equalizerEnabled', defaultValue: false),
+);
+
+final equalizerBandGains = ValueNotifier<List<double>>(_readEqualizerGains());
+
 Locale languageSetting = getLocaleFromLanguageCode(
-  Hive.box('settings').get('language', defaultValue: 'English') as String,
+  Hive.box('settings').get('languageCode', defaultValue: 'en') as String,
 );
 
 final themeModeSetting =

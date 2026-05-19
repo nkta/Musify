@@ -21,11 +21,16 @@
 
 import 'package:flutter/material.dart';
 
-void showCustomBottomSheet(BuildContext context, Widget content) {
+PersistentBottomSheetController? _currentBottomSheetController;
+
+PersistentBottomSheetController? showCustomBottomSheet(
+  BuildContext context,
+  Widget content,
+) {
   final size = MediaQuery.sizeOf(context);
   final colorScheme = Theme.of(context).colorScheme;
 
-  showBottomSheet(
+  final controller = showBottomSheet(
     enableDrag: true,
     context: context,
     builder: (context) => Container(
@@ -55,7 +60,10 @@ void showCustomBottomSheet(BuildContext context, Widget content) {
             ),
           ),
           ConstrainedBox(
-            constraints: BoxConstraints(maxHeight: size.height * 0.65),
+            constraints: BoxConstraints(
+              maxWidth: size.width * 0.92,
+              maxHeight: size.height * 0.65,
+            ),
             child: SingleChildScrollView(
               padding: const EdgeInsets.only(bottom: 16),
               child: content,
@@ -65,4 +73,20 @@ void showCustomBottomSheet(BuildContext context, Widget content) {
       ),
     ),
   );
+
+  _currentBottomSheetController = controller;
+  controller.closed.whenComplete(() {
+    if (_currentBottomSheetController == controller) {
+      _currentBottomSheetController = null;
+    }
+  });
+
+  return controller;
+}
+
+void closeCurrentBottomSheet() {
+  try {
+    _currentBottomSheetController?.close();
+  } catch (_) {}
+  _currentBottomSheetController = null;
 }

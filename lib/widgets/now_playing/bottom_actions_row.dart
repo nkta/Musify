@@ -22,18 +22,17 @@
 import 'package:audio_service/audio_service.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
-import 'package:musify/API/musify.dart';
 import 'package:musify/extensions/l10n.dart';
 import 'package:musify/main.dart';
+import 'package:musify/services/common_services.dart';
 import 'package:musify/services/settings_manager.dart';
-import 'package:musify/utilities/common_variables.dart';
 import 'package:musify/utilities/flutter_bottom_sheet.dart';
 import 'package:musify/utilities/flutter_toast.dart';
 import 'package:musify/utilities/mediaitem.dart';
-import 'package:musify/utilities/utils.dart';
-import 'package:musify/widgets/song_bar.dart';
+import 'package:musify/utilities/playlist_dialogs.dart';
+import 'package:musify/widgets/queue_list_view.dart';
 
-class BottomActionsRow extends StatelessWidget {
+class BottomActionsRow extends StatefulWidget {
   const BottomActionsRow({
     super.key,
     required this.audioId,
@@ -49,116 +48,130 @@ class BottomActionsRow extends StatelessWidget {
   final dynamic lyricsController;
 
   @override
+  State<BottomActionsRow> createState() => _BottomActionsRowState();
+}
+
+class _BottomActionsRowState extends State<BottomActionsRow> {
+  late final ValueNotifier<bool> _songLikeStatus;
+  late final ValueNotifier<bool> _songOfflineStatus;
+
+  @override
+  void initState() {
+    super.initState();
+    _songLikeStatus = ValueNotifier<bool>(isSongAlreadyLiked(widget.audioId));
+    _songOfflineStatus = ValueNotifier<bool>(
+      isSongAlreadyOffline(widget.audioId),
+    );
+  }
+
+  @override
+  void didUpdateWidget(BottomActionsRow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.audioId != widget.audioId) {
+      _songLikeStatus.value = isSongAlreadyLiked(widget.audioId);
+      _songOfflineStatus.value = isSongAlreadyOffline(widget.audioId);
+    }
+  }
+
+  @override
+  void dispose() {
+    _songLikeStatus.dispose();
+    _songOfflineStatus.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final songLikeStatus = ValueNotifier<bool>(isSongAlreadyLiked(audioId));
-    final songOfflineStatus = ValueNotifier<bool>(
-      isSongAlreadyOffline(audioId),
-    );
+    final l10n = context.l10n!;
 
     final screenWidth = MediaQuery.sizeOf(context).width;
-    final responsiveIconSize = screenWidth < 360 ? iconSize * 0.85 : iconSize;
-    final spacing = screenWidth < 360 ? 6.0 : 10.0;
+    final responsiveIconSize = screenWidth < 360
+        ? widget.iconSize * 0.85
+        : widget.iconSize;
 
-    return StreamBuilder<List<MediaItem>>(
-      stream: audioHandler.queue,
+    return StreamBuilder<List<Map>>(
+      stream: audioHandler.queueAsMapStream,
       builder: (context, snapshot) {
         final queue = snapshot.data ?? [];
-        final mappedQueue = queue.isNotEmpty
-            ? queue.map(mediaItemToMap).toList()
-            : [];
 
         final actions = <Widget>[
           _buildActionButton(
             context: context,
-            icon: FluentIcons.cellular_data_1_24_regular,
-            activeIcon: FluentIcons.cellular_off_24_regular,
+            icon: FluentIcons.cloud_arrow_down_24_regular,
+            activeIcon: FluentIcons.cloud_off_24_filled,
             colorScheme: colorScheme,
             size: responsiveIconSize,
-            statusNotifier: songOfflineStatus,
-            onPressed: audioId == null
+            statusNotifier: _songOfflineStatus,
+            onPressed: widget.audioId == null
                 ? null
-                : () => _toggleOffline(songOfflineStatus, audioId, metadata),
-            tooltip: 'Offline',
+                : () => _toggleOffline(
+                    _songOfflineStatus,
+                    widget.audioId,
+                    widget.metadata,
+                  ),
+            tooltip: l10n.makeOffline,
           ),
-        ];
-
-        if (!offlineMode.value) {
-          actions.add(
+          _buildSleepTimerButton(context, colorScheme, responsiveIconSize),
+          if (!offlineMode.value)
             _buildSimpleActionButton(
               context: context,
-              icon: FluentIcons.add_24_regular,
+              icon: FluentIcons.album_add_24_regular,
               colorScheme: colorScheme,
               size: responsiveIconSize,
-              onPressed: () =>
-                  showAddToPlaylistDialog(context, mediaItemToMap(metadata)),
-              tooltip: 'Add to playlist',
+              onPressed: () => showAddToPlaylistDialog(
+                context,
+                song: mediaItemToMap(widget.metadata),
+              ),
+              tooltip: l10n.addToPlaylist,
             ),
-          );
-        }
-
-        if (queue.isNotEmpty && !isLargeScreen) {
-          actions.add(
+          if (queue.isNotEmpty && !widget.isLargeScreen)
             _buildSimpleActionButton(
               context: context,
               icon: FluentIcons.apps_list_24_filled,
               colorScheme: colorScheme,
               size: responsiveIconSize,
-              onPressed: () => _showQueue(context, mappedQueue),
-              tooltip: 'Queue',
+              onPressed: () => showCustomBottomSheet(
+                context,
+                const QueueWidget(isBottomSheet: true),
+              ),
+              tooltip: l10n.queue,
             ),
-          );
-        }
-
-        if (!offlineMode.value) {
-          actions.addAll([
+          if (!offlineMode.value) ...[
+            _buildSimpleActionButton(
+              context: context,
+              icon: FluentIcons.text_quote_24_regular,
+              colorScheme: colorScheme,
+              size: responsiveIconSize,
+              onPressed: widget.lyricsController.flipcard,
+              tooltip: l10n.lyrics,
+            ),
             _buildActionButton(
               context: context,
               icon: FluentIcons.heart_24_regular,
               activeIcon: FluentIcons.heart_24_filled,
               colorScheme: colorScheme,
               size: responsiveIconSize,
-              statusNotifier: songLikeStatus,
+              statusNotifier: _songLikeStatus,
               activeColor: colorScheme.primary,
               onPressed: () {
-                updateSongLikeStatus(audioId, !songLikeStatus.value);
-                songLikeStatus.value = !songLikeStatus.value;
+                updateSongLikeStatus(widget.audioId, !_songLikeStatus.value);
+                _songLikeStatus.value = !_songLikeStatus.value;
               },
-              tooltip: 'Like',
+              tooltip: l10n.likedSongs,
             ),
-            _buildSimpleActionButton(
-              context: context,
-              icon: FluentIcons.text_quote_24_regular,
-              colorScheme: colorScheme,
-              size: responsiveIconSize,
-              onPressed: lyricsController.flipcard,
-              tooltip: 'Lyrics',
-            ),
-            _buildSleepTimerButton(context, colorScheme, responsiveIconSize),
-          ]);
-        }
-
-        final childrenWithSpacing = <Widget>[];
-        for (var i = 0; i < actions.length; i++) {
-          childrenWithSpacing.add(actions[i]);
-          if (i != actions.length - 1) {
-            childrenWithSpacing.add(SizedBox(width: spacing));
-          }
-        }
+          ],
+        ];
 
         return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
             color: colorScheme.surfaceContainerHigh,
             borderRadius: BorderRadius.circular(20),
           ),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            physics: const BouncingScrollPhysics(),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: childrenWithSpacing,
-            ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: actions,
           ),
         );
       },
@@ -192,6 +205,7 @@ class BottomActionsRow extends StatelessWidget {
             backgroundColor: isActive
                 ? (activeColor ?? colorScheme.primary).withValues(alpha: 0.15)
                 : Colors.transparent,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
             ),
@@ -215,6 +229,7 @@ class BottomActionsRow extends StatelessWidget {
       iconSize: size,
       tooltip: tooltip,
       style: IconButton.styleFrom(
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
       onPressed: onPressed,
@@ -240,11 +255,12 @@ class BottomActionsRow extends StatelessWidget {
                 : colorScheme.onSurfaceVariant,
           ),
           iconSize: size,
-          tooltip: 'Sleep timer',
+          tooltip: context.l10n!.sleepTimer,
           style: IconButton.styleFrom(
             backgroundColor: isActive
                 ? colorScheme.primary.withValues(alpha: 0.15)
                 : Colors.transparent,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
             ),
@@ -288,104 +304,8 @@ Future<void> _toggleOffline(
     }
   } catch (e) {
     status.value = originalValue;
-    logger.log('Error toggling offline status', e, null);
+    logger.log('Error toggling offline status', error: e);
   }
-}
-
-void _showQueue(BuildContext context, List<dynamic> mappedQueue) {
-  final colorScheme = Theme.of(context).colorScheme;
-  final currentIndex = audioHandler.currentQueueIndex;
-
-  showCustomBottomSheet(
-    context,
-    Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // Header
-        Padding(
-          padding: const EdgeInsets.only(left: 10, right: 8, bottom: 12),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: colorScheme.primaryContainer,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(
-                  FluentIcons.apps_list_24_filled,
-                  color: colorScheme.onPrimaryContainer,
-                  size: 20,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      context.l10n!.queue,
-                      style: TextStyle(
-                        color: colorScheme.onSurface,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    Text(
-                      '${mappedQueue.length} ${context.l10n!.songs}',
-                      style: TextStyle(
-                        color: colorScheme.onSurfaceVariant,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              FilledButton.tonalIcon(
-                onPressed: () {
-                  audioHandler.clearQueue();
-                  Navigator.pop(context);
-                },
-                icon: const Icon(FluentIcons.dismiss_24_regular, size: 18),
-                label: Text(context.l10n!.clear),
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 8,
-                  ),
-                  visualDensity: VisualDensity.compact,
-                ),
-              ),
-            ],
-          ),
-        ),
-        // Queue list
-        ListView.builder(
-          shrinkWrap: true,
-          physics: const BouncingScrollPhysics(),
-          padding: commonListViewBottomPadding,
-          itemCount: mappedQueue.length,
-          itemBuilder: (BuildContext context, int index) {
-            final isCurrentSong = index == currentIndex;
-            final borderRadius = getItemBorderRadius(index, mappedQueue.length);
-
-            return SongBar(
-              mappedQueue[index],
-              false,
-              onPlay: () {
-                audioHandler.skipToSong(index);
-                Navigator.pop(context);
-              },
-              backgroundColor: isCurrentSong
-                  ? colorScheme.primaryContainer.withValues(alpha: 0.3)
-                  : colorScheme.surfaceContainerHigh,
-              borderRadius: borderRadius,
-            );
-          },
-        ),
-      ],
-    ),
-  );
 }
 
 void _showSleepTimerDialog(BuildContext context) {
@@ -401,16 +321,13 @@ void _showSleepTimerDialog(BuildContext context) {
       return StatefulBuilder(
         builder: (context, setState) {
           return AlertDialog(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(28),
-            ),
-            backgroundColor: colorScheme.surfaceContainerHigh,
             title: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(FluentIcons.timer_24_regular, color: colorScheme.primary),
                 const SizedBox(width: 12),
                 Text(
-                  context.l10n!.setSleepTimer,
+                  context.l10n!.sleepTimer,
                   style: TextStyle(
                     color: colorScheme.onSurface,
                     fontWeight: FontWeight.w600,
@@ -549,7 +466,7 @@ Widget _buildTimeSelector({
           children: [
             IconButton(
               icon: Icon(
-                Icons.remove_rounded,
+                FluentIcons.line_horizontal_1_24_regular,
                 color: colorScheme.onSurfaceVariant,
               ),
               style: IconButton.styleFrom(
@@ -574,7 +491,7 @@ Widget _buildTimeSelector({
             ),
             IconButton(
               icon: Icon(
-                Icons.add_rounded,
+                FluentIcons.add_24_regular,
                 color: colorScheme.onSurfaceVariant,
               ),
               style: IconButton.styleFrom(

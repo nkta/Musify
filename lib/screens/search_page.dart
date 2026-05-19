@@ -23,12 +23,15 @@ import 'dart:async';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
-import 'package:musify/API/musify.dart';
+import 'package:musify/constants/app_constants.dart';
 import 'package:musify/extensions/l10n.dart';
 import 'package:musify/main.dart';
 import 'package:musify/screens/playlist_page.dart';
+import 'package:musify/services/common_services.dart';
 import 'package:musify/services/data_manager.dart';
+import 'package:musify/services/playlists_manager.dart';
 import 'package:musify/services/proxy_manager.dart';
+import 'package:musify/utilities/app_utils.dart';
 import 'package:musify/utilities/common_variables.dart';
 import 'package:musify/utilities/flutter_toast.dart';
 import 'package:musify/utilities/formatter.dart';
@@ -76,6 +79,24 @@ class _SearchPageState extends State<SearchPage> {
   List<dynamic> _playlistsSearchResult = [];
   List<String> _suggestionsList = [];
   Timer? _debounce;
+  int _latestSuggestionRequest = 0;
+
+  Future<void> _submitSearch([String? query]) async {
+    if (query != null) {
+      _searchBar.text = query;
+      _searchBar.selection = TextSelection.fromPosition(
+        TextPosition(offset: _searchBar.text.length),
+      );
+    }
+
+    _latestSuggestionRequest++;
+    _debounce?.cancel();
+    _suggestionsList = [];
+    if (mounted) setState(() {});
+
+    await search();
+    _inputNode.unfocus();
+  }
 
   @override
   void initState() {
@@ -168,7 +189,7 @@ class _SearchPageState extends State<SearchPage> {
     if (!searchHistory.contains(query)) {
       final updatedHistory = List.from(searchHistory)..insert(0, query);
       searchHistoryNotifier.value = updatedHistory;
-      await addOrUpdateData('user', 'searchHistory', updatedHistory);
+      unawaited(addOrUpdateData('user', 'searchHistory', updatedHistory));
     }
 
     try {
@@ -179,7 +200,11 @@ class _SearchPageState extends State<SearchPage> {
         type: 'playlist',
       );
     } catch (e, stackTrace) {
-      logger.log('Error while searching online songs', e, stackTrace);
+      logger.log(
+        'Error while searching online songs',
+        error: e,
+        stackTrace: stackTrace,
+      );
     } finally {
       _fetchingSongs.value = false;
       if (mounted) {
@@ -220,27 +245,38 @@ class _SearchPageState extends State<SearchPage> {
                     onChanged: (value) {
                       // debounce suggestions to avoid rapid API calls
                       _debounce?.cancel();
+                      final query = value;
+                      final requestId = ++_latestSuggestionRequest;
+
+                      // Clear suggestions immediately if input is empty
+                      if (query.isEmpty) {
+                        _suggestionsList = [];
+                        if (mounted) setState(() {});
+                        return;
+                      }
+
                       _debounce = Timer(
                         const Duration(milliseconds: 300),
                         () async {
-                          if (value.isNotEmpty) {
-                            final searchSuggestions =
-                                await getSearchSuggestions(value);
+                          final searchSuggestions = await getSearchSuggestions(
+                            query,
+                          );
 
-                            _suggestionsList = List<String>.from(
-                              searchSuggestions,
-                            );
-                          } else {
-                            _suggestionsList = [];
+                          if (!mounted ||
+                              requestId != _latestSuggestionRequest ||
+                              _searchBar.text != query) {
+                            return;
                           }
+
+                          _suggestionsList = List<String>.from(
+                            searchSuggestions,
+                          );
                           if (mounted) setState(() {});
                         },
                       );
                     },
                     onSubmitted: (String value) {
-                      search();
-                      _suggestionsList = [];
-                      _inputNode.unfocus();
+                      _submitSearch();
                     },
                   ),
                 );
@@ -281,14 +317,8 @@ class _SearchPageState extends State<SearchPage> {
 
             AnimatedSwitcher(
               duration: const Duration(milliseconds: 200),
-              child: hasAnyResults
-                  ? _buildSearchResults(
-                      context,
-                      primaryColor,
-                      showSongs: showSongs,
-                      showPlaylists: showPlaylists,
-                    )
-                  : ValueListenableBuilder<List>(
+              child: (_suggestionsList.isNotEmpty || !hasAnyResults)
+                  ? ValueListenableBuilder<List>(
                       valueListenable: searchHistoryNotifier,
                       builder: (context, searchHistory, _) {
                         final items = _suggestionsList.isEmpty
@@ -314,9 +344,7 @@ class _SearchPageState extends State<SearchPage> {
                                     FluentIcons.search_24_regular,
                                     borderRadius: borderRadius,
                                     onTap: () async {
-                                      _searchBar.text = query;
-                                      await search();
-                                      _inputNode.unfocus();
+                                      await _submitSearch(query.toString());
                                     },
                                     onLongPress: () async {
                                       final confirm =
@@ -331,10 +359,12 @@ class _SearchPageState extends State<SearchPage> {
                                         )..remove(query);
                                         searchHistoryNotifier.value =
                                             updatedHistory;
-                                        await addOrUpdateData(
-                                          'user',
-                                          'searchHistory',
-                                          updatedHistory,
+                                        unawaited(
+                                          addOrUpdateData(
+                                            'user',
+                                            'searchHistory',
+                                            updatedHistory,
+                                          ),
                                         );
                                       }
                                     },
@@ -344,6 +374,12 @@ class _SearchPageState extends State<SearchPage> {
                           ],
                         );
                       },
+                    )
+                  : _buildSearchResults(
+                      context,
+                      primaryColor,
+                      showSongs: showSongs,
+                      showPlaylists: showPlaylists,
                     ),
             ),
           ],
@@ -380,7 +416,7 @@ class _SearchPageState extends State<SearchPage> {
           SongBar(
             _songsSearchResult[index],
             true,
-            key: ValueKey('song_${_songsSearchResult[index]['ytid']}_$index'),
+            key: listItemKey('search_song', index, _songsSearchResult[index]),
             showMusicDuration: true,
             borderRadius: borderRadius,
           ),
@@ -408,7 +444,7 @@ class _SearchPageState extends State<SearchPage> {
 
         widgets.add(
           PlaylistBar(
-            key: ValueKey('album_${playlist['ytid']}_$index'),
+            key: listItemKey('search_album', index, playlist),
             playlist['title'],
             playlistId: playlist['ytid'],
             playlistArtwork: playlist['image'],
@@ -426,7 +462,7 @@ class _SearchPageState extends State<SearchPage> {
         SectionTitle(
           context.l10n!.playlists,
           primaryColor,
-          icon: FluentIcons.list_24_filled,
+          icon: FluentIcons.text_bullet_list_24_filled,
         ),
       );
 
@@ -442,7 +478,7 @@ class _SearchPageState extends State<SearchPage> {
           Padding(
             padding: isLast ? commonListViewBottomPadding : EdgeInsets.zero,
             child: PlaylistBar(
-              key: ValueKey('playlist_${playlist['ytid']}_$index'),
+              key: listItemKey('search_playlist', index, playlist),
               playlist['title'],
               playlistId: playlist['ytid'],
               playlistArtwork: playlist['image'],

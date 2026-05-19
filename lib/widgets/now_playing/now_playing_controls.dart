@@ -22,9 +22,10 @@
 import 'package:audio_service/audio_service.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
+import 'package:musify/extensions/l10n.dart';
 import 'package:musify/main.dart';
 import 'package:musify/services/settings_manager.dart';
-import 'package:musify/utilities/utils.dart';
+import 'package:musify/utilities/app_utils.dart';
 import 'package:musify/widgets/now_playing/marquee_text_widget.dart';
 import 'package:musify/widgets/playback_icon_button.dart';
 import 'package:musify/widgets/position_slider.dart';
@@ -205,6 +206,7 @@ class PlayerControlButtons extends StatelessWidget {
           child: Row(
             children: <Widget>[
               _buildShuffleButton(
+                context,
                 colorScheme,
                 miniControlSize,
                 buttonConstraints,
@@ -226,13 +228,14 @@ class PlayerControlButtons extends StatelessWidget {
                               children: [
                                 IconButton(
                                   icon: Icon(
-                                    FluentIcons.previous_24_filled,
+                                    FluentIcons.previous_24_regular,
                                     color: audioHandler.hasPrevious
                                         ? colorScheme.onSurface
                                         : colorScheme.onSurface.withValues(
                                             alpha: 0.3,
                                           ),
                                   ),
+                                  tooltip: context.l10n!.skipToPrevious,
                                   constraints: buttonConstraints,
                                   iconSize: controlIconSize * 0.65,
                                   onPressed: audioHandler.hasPrevious
@@ -263,13 +266,14 @@ class PlayerControlButtons extends StatelessWidget {
                                 SizedBox(width: buttonSpacing),
                                 IconButton(
                                   icon: Icon(
-                                    FluentIcons.next_24_filled,
+                                    FluentIcons.next_24_regular,
                                     color: audioHandler.hasNext
                                         ? colorScheme.onSurface
                                         : colorScheme.onSurface.withValues(
                                             alpha: 0.3,
                                           ),
                                   ),
+                                  tooltip: context.l10n!.skipToNext,
                                   constraints: buttonConstraints,
                                   iconSize: controlIconSize * 0.65,
                                   onPressed: () =>
@@ -303,6 +307,7 @@ class PlayerControlButtons extends StatelessWidget {
               ),
               SizedBox(width: buttonSpacing),
               _buildRepeatButton(
+                context,
                 colorScheme,
                 miniControlSize,
                 buttonConstraints,
@@ -316,6 +321,7 @@ class PlayerControlButtons extends StatelessWidget {
   }
 
   Widget _buildShuffleButton(
+    BuildContext context,
     ColorScheme colorScheme,
     double size,
     BoxConstraints buttonConstraints,
@@ -328,9 +334,10 @@ class PlayerControlButtons extends StatelessWidget {
           icon: Icon(
             value
                 ? FluentIcons.arrow_shuffle_24_filled
-                : FluentIcons.arrow_shuffle_off_24_filled,
+                : FluentIcons.arrow_shuffle_off_24_regular,
             color: value ? colorScheme.onPrimary : colorScheme.onSurfaceVariant,
           ),
+          tooltip: context.l10n!.shuffle,
           iconSize: size,
           constraints: buttonConstraints,
           padding: buttonPadding,
@@ -355,6 +362,7 @@ class PlayerControlButtons extends StatelessWidget {
   }
 
   Widget _buildRepeatButton(
+    BuildContext context,
     ColorScheme colorScheme,
     double size,
     BoxConstraints buttonConstraints,
@@ -375,11 +383,12 @@ class PlayerControlButtons extends StatelessWidget {
                     ? FluentIcons.arrow_repeat_1_24_filled
                     : isActive
                     ? FluentIcons.arrow_repeat_all_24_filled
-                    : FluentIcons.arrow_repeat_all_off_24_filled,
+                    : FluentIcons.arrow_repeat_all_off_24_regular,
                 color: isActive
                     ? colorScheme.onPrimary
                     : colorScheme.onSurfaceVariant,
               ),
+              tooltip: context.l10n!.repeat,
               iconSize: size,
               constraints: buttonConstraints,
               padding: buttonPadding,

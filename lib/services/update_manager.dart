@@ -26,7 +26,7 @@ import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:musify/API/version.dart';
+import 'package:musify/constants/version.dart';
 import 'package:musify/extensions/l10n.dart';
 import 'package:musify/main.dart';
 import 'package:musify/services/data_manager.dart';
@@ -50,8 +50,6 @@ Future<void> checkAppUpdates() async {
     if (response.statusCode != 200) {
       logger.log(
         'Fetch update API (checkUrl) call returned status code ${response.statusCode}',
-        null,
-        null,
       );
       return;
     }
@@ -69,8 +67,6 @@ Future<void> checkAppUpdates() async {
     if (releasesRequest.statusCode != 200) {
       logger.log(
         'Fetch update API (releasesUrl) call returned status code ${response.statusCode}',
-        null,
-        null,
       );
       return;
     }
@@ -84,11 +80,6 @@ Future<void> checkAppUpdates() async {
         final colorScheme = Theme.of(context).colorScheme;
 
         return AlertDialog(
-          backgroundColor: colorScheme.surface,
-          surfaceTintColor: Colors.transparent,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(28),
-          ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -99,7 +90,7 @@ Future<void> checkAppUpdates() async {
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
-                  FluentIcons.arrow_download_24_filled,
+                  FluentIcons.arrow_download_24_regular,
                   color: colorScheme.onPrimaryContainer,
                   size: 32,
                 ),
@@ -168,7 +159,7 @@ Future<void> checkAppUpdates() async {
                   (url) => {launchURL(Uri.parse(url)), Navigator.pop(context)},
                 );
               },
-              icon: const Icon(FluentIcons.arrow_download_20_filled),
+              icon: const Icon(FluentIcons.arrow_download_20_regular),
               label: Text(context.l10n!.download),
             ),
           ],
@@ -176,7 +167,7 @@ Future<void> checkAppUpdates() async {
       },
     );
   } catch (e, stackTrace) {
-    logger.log('Error in checkAppUpdates', e, stackTrace);
+    logger.log('Error in checkAppUpdates', error: e, stackTrace: stackTrace);
   }
 }
 
@@ -187,9 +178,6 @@ void showUpdateCheckDialog(BuildContext context) {
     context: context,
     builder: (context) {
       return AlertDialog(
-        backgroundColor: colorScheme.surface,
-        surfaceTintColor: Colors.transparent,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
         icon: Icon(
           FluentIcons.arrow_sync_circle_24_regular,
           color: colorScheme.primary,
@@ -292,8 +280,6 @@ Future<void> fetchAnnouncementOnly() async {
     if (response.statusCode != 200) {
       logger.log(
         'Fetch announcement (checkUrl) call returned status code ${response.statusCode}',
-        null,
-        null,
       );
       return;
     }
@@ -304,6 +290,10 @@ Future<void> fetchAnnouncementOnly() async {
       announcementURL.value = ann.toString();
     }
   } catch (e, stackTrace) {
-    logger.log('Error in fetchAnnouncementOnly', e, stackTrace);
+    logger.log(
+      'Error in fetchAnnouncementOnly',
+      error: e,
+      stackTrace: stackTrace,
+    );
   }
 }

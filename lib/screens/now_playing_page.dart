@@ -20,6 +20,7 @@
  */
 
 import 'package:audio_service/audio_service.dart';
+import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_flip_card/flutter_flip_card.dart';
 import 'package:musify/main.dart';
@@ -97,11 +98,8 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
       child: Row(
         children: [
           IconButton(
-            icon: Icon(
-              Icons.keyboard_arrow_down_rounded,
-              color: colorScheme.onSurface,
-              size: 28,
-            ),
+            iconSize: 26,
+            icon: const Icon(FluentIcons.chevron_down_24_regular),
             style: IconButton.styleFrom(
               backgroundColor: colorScheme.surfaceContainerHighest,
               shape: RoundedRectangleBorder(
@@ -132,8 +130,6 @@ class _DesktopLayout extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-
     return Row(
       children: [
         Expanded(
@@ -175,23 +171,7 @@ class _DesktopLayout extends StatelessWidget {
             ),
           ),
         ),
-        Container(
-          width: 1,
-          margin: const EdgeInsets.symmetric(vertical: 24),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                colorScheme.outlineVariant.withValues(alpha: 0),
-                colorScheme.outlineVariant,
-                colorScheme.outlineVariant,
-                colorScheme.outlineVariant.withValues(alpha: 0),
-              ],
-            ),
-          ),
-        ),
-        const Expanded(child: QueueListView()),
+        const Expanded(child: QueueWidget()),
       ],
     );
   }

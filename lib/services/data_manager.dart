@@ -25,7 +25,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:hive/hive.dart';
 import 'package:musify/extensions/l10n.dart';
-import 'package:musify/main.dart';
+import 'package:musify/main.dart' show logger;
 
 // Cache durations for different types of data
 const Duration songCacheDuration = Duration(hours: 1, minutes: 30);
@@ -50,6 +50,20 @@ class _CacheEntry {
 const int _maxMemoryCacheSize = 500;
 const int _memoryCacheTrimSize = 100;
 
+void _setMemoryCacheEntry(String key, _CacheEntry entry) {
+  _memoryCache
+    ..remove(key)
+    ..[key] = entry;
+  _trimMemoryCacheIfNeeded();
+}
+
+void _touchMemoryCacheEntry(String key) {
+  final entry = _memoryCache.remove(key);
+  if (entry != null) {
+    _memoryCache[key] = entry;
+  }
+}
+
 void _trimMemoryCacheIfNeeded() {
   if (_memoryCache.length > _maxMemoryCacheSize) {
     final keysToRemove = _memoryCache.keys.take(_memoryCacheTrimSize).toList();
@@ -68,8 +82,7 @@ Future<void> addOrUpdateData(String category, String key, dynamic value) async {
 
     // Update memory cache too
     final cacheKey = '${category}_$key';
-    _memoryCache[cacheKey] = _CacheEntry(value, DateTime.now());
-    _trimMemoryCacheIfNeeded();
+    _setMemoryCacheEntry(cacheKey, _CacheEntry(value, DateTime.now()));
   }
 }
 
@@ -86,13 +99,14 @@ Future<dynamic> getData(
   final cacheKey = '${category}_$key';
   final memCacheEntry = _memoryCache[cacheKey];
   if (memCacheEntry != null && memCacheEntry.isValid(cachingDuration)) {
+    _touchMemoryCacheEntry(cacheKey);
     return memCacheEntry.data;
   }
   _trimMemoryCacheIfNeeded();
 
   final _box = await _openBox(category);
   if (category == 'cache') {
-    final cacheIsValid = await isCacheValid(_box, key, cachingDuration);
+    final cacheIsValid = isCacheValid(_box, key, cachingDuration);
     if (!cacheIsValid) {
       await deleteData(category, key);
       await deleteData(category, '${key}_date');
@@ -105,7 +119,7 @@ Future<dynamic> getData(
   // Store in memory cache for faster access next time
   if (data != null && category == 'cache') {
     final timestamp = await _box.get('${key}_date') ?? DateTime.now();
-    _memoryCache[cacheKey] = _CacheEntry(data, timestamp);
+    _setMemoryCacheEntry(cacheKey, _CacheEntry(data, timestamp));
   }
 
   return data;
@@ -129,7 +143,7 @@ Future<bool> clearCache() async {
     await cacheBox.clear();
     return true;
   } catch (e, stackTrace) {
-    logger.log('Failed to clear cache', e, stackTrace);
+    logger.log('Failed to clear cache', error: e, stackTrace: stackTrace);
     return false;
   }
 }
@@ -162,12 +176,16 @@ Future<void> cleanupOldCacheEntries() async {
       }
     }
   } catch (e, stackTrace) {
-    logger.log('Error cleaning up old cache entries', e, stackTrace);
+    logger.log(
+      'Error cleaning up old cache entries',
+      error: e,
+      stackTrace: stackTrace,
+    );
   }
 }
 
 // Check if the cache is still valid based on the caching duration
-Future<bool> isCacheValid(Box box, String key, Duration cachingDuration) async {
+bool isCacheValid(Box box, String key, Duration cachingDuration) {
   final date = box.get('${key}_date');
   if (date == null) {
     return false;
@@ -195,16 +213,18 @@ Future<Box> _openBox(String category) async {
   }
 }
 
-Future<String> backupData(BuildContext context) async {
+Future<({String message, bool success})> backupData(
+  BuildContext context,
+) async {
   final boxNames = ['user', 'settings'];
-  final dlPath = await FilePicker.platform.getDirectoryPath();
+  final dlPath = await FilePicker.getDirectoryPath();
 
   if (dlPath == null) {
-    return '${context.l10n!.chooseBackupDir}!';
+    return (message: '${context.l10n!.chooseBackupDir}!', success: false);
   }
 
   if (!dlPath.contains('Documents') && !dlPath.contains('Download')) {
-    return context.l10n!.folderRestrictions;
+    return (message: context.l10n!.folderRestrictions, success: false);
   }
 
   try {
@@ -212,7 +232,7 @@ Future<String> backupData(BuildContext context) async {
       final box = await _openBox(boxName);
 
       if (box.path == null) {
-        logger.log('Box path is null for $boxName', null, null);
+        logger.log('Box path is null for $boxName');
         continue;
       }
 
@@ -238,8 +258,12 @@ Future<String> backupData(BuildContext context) async {
       // Compact the box before copying
       try {
         await box.compact();
-      } catch (e) {
-        logger.log('Failed to compact box $boxName: $e', null, null);
+      } catch (e, stackTrace) {
+        logger.log(
+          'Failed to compact box $boxName',
+          error: e,
+          stackTrace: stackTrace,
+        );
       }
 
       // Copy the box file to backup location
@@ -248,25 +272,25 @@ Future<String> backupData(BuildContext context) async {
       } else {
         logger.log(
           'Source file does not exist for $boxName at ${sourceFile.path}',
-          null,
-          null,
         );
       }
     }
 
-    return '${context.l10n!.backedupSuccess}!';
+    return (message: '${context.l10n!.backedupSuccess}!', success: true);
   } catch (e, stackTrace) {
-    logger.log('Backup error', e, stackTrace);
-    return '${context.l10n!.backupError}: $e';
+    logger.log('Backup error', error: e, stackTrace: stackTrace);
+    return (message: '${context.l10n!.backupError}: $e', success: false);
   }
 }
 
-Future<String> restoreData(BuildContext context) async {
+Future<({String message, bool success})> restoreData(
+  BuildContext context,
+) async {
   final boxNames = ['user', 'settings'];
-  final result = await FilePicker.platform.pickFiles(allowMultiple: true);
+  final result = await FilePicker.pickFiles(allowMultiple: true);
 
   if (result == null || result.files.isEmpty) {
-    return '${context.l10n!.chooseBackupFiles}!';
+    return (message: '${context.l10n!.chooseBackupFiles}!', success: false);
   }
 
   try {
@@ -275,8 +299,12 @@ Future<String> restoreData(BuildContext context) async {
       if (Hive.isBoxOpen(boxName)) {
         try {
           await Hive.box(boxName).close();
-        } catch (e) {
-          logger.log('Failed to close box $boxName: $e', null, null);
+        } catch (e, stackTrace) {
+          logger.log(
+            'Failed to close box $boxName',
+            error: e,
+            stackTrace: stackTrace,
+          );
         }
       }
     }
@@ -313,8 +341,12 @@ Future<String> restoreData(BuildContext context) async {
               if (await targetFile.exists()) {
                 try {
                   await targetFile.delete();
-                } catch (e) {
-                  logger.log('Failed to delete existing file: $e', null, null);
+                } catch (e, stackTrace) {
+                  logger.log(
+                    'Failed to delete existing file',
+                    error: e,
+                    stackTrace: stackTrace,
+                  );
                 }
               }
 
@@ -322,26 +354,20 @@ Future<String> restoreData(BuildContext context) async {
               await sourceFile.copy(targetFile.path);
               logger.log(
                 'Restored $boxName from ${sourceFile.path} to ${targetFile.path}',
-                null,
-                null,
               );
             }
-          } catch (e) {
-            logger.log('Failed to restore $boxName: $e', null, null);
+          } catch (e, stackTrace) {
+            logger.log(
+              'Failed to restore $boxName',
+              error: e,
+              stackTrace: stackTrace,
+            );
           }
         } else {
-          logger.log(
-            'Backup file does not exist: ${sourceFile.path}',
-            null,
-            null,
-          );
+          logger.log('Backup file does not exist: ${sourceFile.path}');
         }
       } else {
-        logger.log(
-          'Backup file for $boxName not found in selection',
-          null,
-          null,
-        );
+        logger.log('Backup file for $boxName not found in selection');
       }
     }
 
@@ -352,14 +378,18 @@ Future<String> restoreData(BuildContext context) async {
     for (final boxName in boxNames) {
       try {
         await _openBox(boxName);
-      } catch (e) {
-        logger.log('Failed to reopen box $boxName: $e', null, null);
+      } catch (e, stackTrace) {
+        logger.log(
+          'Failed to reopen box $boxName',
+          error: e,
+          stackTrace: stackTrace,
+        );
       }
     }
 
-    return '${context.l10n!.restoredSuccess}!';
+    return (message: '${context.l10n!.restoredSuccess}!', success: true);
   } catch (e, stackTrace) {
-    logger.log('Restore error', e, stackTrace);
-    return '${context.l10n!.restoreError}: $e';
+    logger.log('Restore error', error: e, stackTrace: stackTrace);
+    return (message: '${context.l10n!.restoreError}: $e', success: false);
   }
 }

@@ -30,7 +30,6 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:hive_flutter/hive_flutter.dart';
-import 'package:musify/API/musify.dart';
 import 'package:musify/extensions/l10n.dart';
 import 'package:musify/localization/app_localizations.dart';
 import 'package:musify/services/audio_service.dart';
@@ -38,55 +37,26 @@ import 'package:musify/services/data_manager.dart';
 import 'package:musify/services/io_service.dart';
 import 'package:musify/services/logger_service.dart';
 import 'package:musify/services/playlist_sharing.dart';
+import 'package:musify/services/playlists_manager.dart';
 import 'package:musify/services/router_service.dart';
 import 'package:musify/services/settings_manager.dart';
 import 'package:musify/services/update_manager.dart';
-import 'package:musify/style/app_themes.dart';
+import 'package:musify/theme/app_themes.dart';
 import 'package:musify/utilities/flutter_toast.dart';
+import 'package:musify/utilities/language_utils.dart';
+import 'package:musify/utilities/playlist_utils.dart';
+import 'package:musify/utilities/sharing_intent.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 
 late MusifyAudioHandler audioHandler;
+late StreamSubscription<String?> sharingIntentSubscription;
 
 final logger = Logger();
 final appLinks = AppLinks();
 
 bool isFdroidBuild = false;
 bool isUpdateChecked = false;
-
-const appLanguages = <String, String>{
-  'English': 'en',
-  'Arabic': 'ar',
-  'Chinese (Simplified)': 'zh',
-  'Chinese (Traditional)': 'zh-Hant',
-  'Estonian': 'et',
-  'French': 'fr',
-  'German': 'de',
-  'Greek': 'el',
-  'Hindi': 'hi',
-  'Hebrew': 'he',
-  'Hungarian': 'hu',
-  'Indonesian': 'id',
-  'Italian': 'it',
-  'Japanese': 'ja',
-  'Korean': 'ko',
-  'Russian': 'ru',
-  'Polish': 'pl',
-  'Portuguese': 'pt',
-  'Spanish': 'es',
-  'Swedish': 'sv',
-  'Turkish': 'tr',
-  'Ukrainian': 'uk',
-};
-
-final List<Locale> appSupportedLocales = appLanguages.values.map((
-  languageCode,
-) {
-  final parts = languageCode.split('-');
-  if (parts.length > 1) {
-    return Locale.fromSubtags(languageCode: parts[0], scriptCode: parts[1]);
-  }
-  return Locale(languageCode);
-}).toList();
 
 class Musify extends StatefulWidget {
   const Musify({super.key});
@@ -155,6 +125,25 @@ class _MusifyState extends State<Musify> {
 
     offlineMode.addListener(_onOfflineModeChanged);
 
+    sharingIntentSubscription = ReceiveSharingIntent.getTextStream().listen(
+      (String? value) async {
+        await consumeYoutubeSharedTextIntent(
+          value,
+          audioHandler: audioHandler,
+          onError: (error, stackTrace) {
+            logger.log(
+              'Error while playing shared song:',
+              error: error,
+              stackTrace: stackTrace,
+            );
+          },
+        );
+      },
+      onError: (err) {
+        logger.log('getTextStream error:', error: err);
+      },
+    );
+
     try {
       LicenseRegistry.addLicense(() async* {
         final license = await rootBundle.loadString(
@@ -163,7 +152,11 @@ class _MusifyState extends State<Musify> {
         yield LicenseEntryWithLineBreaks(['paytoneOne'], license);
       });
     } catch (e, stackTrace) {
-      logger.log('License Registration Error', e, stackTrace);
+      logger.log(
+        'License Registration Error',
+        error: e,
+        stackTrace: stackTrace,
+      );
     }
 
     if (!isFdroidBuild) {
@@ -198,6 +191,7 @@ class _MusifyState extends State<Musify> {
     offlineMode.removeListener(_onOfflineModeChanged);
 
     Hive.close();
+    sharingIntentSubscription.cancel();
     super.dispose();
   }
 
@@ -287,18 +281,18 @@ Future<void> initialisation() async {
       appLinks.uriLinkStream.listen(
         handleIncomingLink,
         onError: (err) {
-          logger.log('URI link error:', err, null);
+          logger.log('URI link error:', error: err);
         },
       );
     } on PlatformException {
-      logger.log('Failed to get initial uri', null, null);
+      logger.log('Failed to get initial uri');
     }
 
     if (isFdroidBuild && !offlineMode.value) {
       await fetchAnnouncementOnly();
     }
   } catch (e, stackTrace) {
-    logger.log('Initialization Error', e, stackTrace);
+    logger.log('Initialization Error', error: e, stackTrace: stackTrace);
   }
 
   applicationDirPath = (await getApplicationDocumentsDirectory()).path;
@@ -316,22 +310,63 @@ void handleIncomingLink(Uri? uri) async {
         );
 
         if (playlist != null) {
-          userCustomPlaylists.value = [...userCustomPlaylists.value, playlist];
-          await addOrUpdateData(
-            'user',
-            'customPlaylists',
-            userCustomPlaylists.value,
-          );
+          // Ensure the incoming playlist has a unique id so it can be removed later
+          if (playlist['ytid'] == null || playlist['ytid'].toString().isEmpty) {
+            playlist['ytid'] = PlaylistUtils.generateCustomPlaylistId();
+          }
+          // Check for duplicate by title and song ytids
+          final incomingYtids = (playlist['list'] as List<dynamic>)
+              .map((s) => s['ytid'].toString())
+              .toList();
+
+          final exists = userCustomPlaylists.value.any((p) {
+            if (p['title'] != playlist['title']) return false;
+            final existingList = (p['list'] as List<dynamic>?) ?? [];
+            final existingYtids = existingList
+                .map((s) => s['ytid']?.toString())
+                .where((e) => e != null)
+                .toList();
+            if (existingYtids.length != incomingYtids.length) return false;
+            for (var i = 0; i < incomingYtids.length; i++) {
+              if (existingYtids[i] != incomingYtids[i]) return false;
+            }
+            return true;
+          });
+
+          if (exists) {
+            showToast(
+              NavigationManager().context,
+              NavigationManager().context.l10n!.playlistAlreadyExists,
+            );
+          } else {
+            userCustomPlaylists.value = [
+              ...userCustomPlaylists.value,
+              playlist,
+            ];
+            unawaited(
+              addOrUpdateData(
+                'user',
+                'customPlaylists',
+                userCustomPlaylists.value,
+              ),
+            );
+            showToast(
+              NavigationManager().context,
+              '${NavigationManager().context.l10n!.addedSuccess}!',
+            );
+          }
+        } else {
           showToast(
             NavigationManager().context,
-            '${NavigationManager().context.l10n!.addedSuccess}!',
+            NavigationManager().context.l10n!.failedToLoadPlaylist,
           );
-        } else {
-          showToast(NavigationManager().context, 'Invalid playlist data');
         }
       }
     } catch (e) {
-      showToast(NavigationManager().context, 'Failed to load playlist');
+      showToast(
+        NavigationManager().context,
+        NavigationManager().context.l10n!.failedToLoadPlaylist,
+      );
     }
   }
 }

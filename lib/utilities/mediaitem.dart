@@ -20,6 +20,7 @@
  */
 
 import 'package:audio_service/audio_service.dart';
+import 'package:musify/services/common_services.dart';
 
 Map mediaItemToMap(MediaItem mediaItem) {
   final extras = mediaItem.extras;
@@ -29,30 +30,43 @@ Map mediaItemToMap(MediaItem mediaItem) {
     'album': mediaItem.album.toString(),
     'artist': mediaItem.artist.toString(),
     'title': mediaItem.title,
-    'highResImage': mediaItem.artUri.toString(),
+    'highResImage': extras?['highResImage'] ?? mediaItem.artUri.toString(),
     'lowResImage': extras?['lowResImage'],
     'isLive': extras?['isLive'] ?? false,
   };
 }
 
-MediaItem mapToMediaItem(Map song) => MediaItem(
-  id: song['id'].toString(),
-  artist: song['artist'].toString().trim(),
-  title: song['title'].toString(),
-  artUri: song['isOffline'] ?? false
-      ? Uri.file(song['highResImage'].toString())
-      : Uri.parse(song['highResImage'].toString()),
-  duration: song['duration'] != null
-      ? Duration(seconds: song['duration'])
-      : null,
-  extras: {
-    'lowResImage': song['lowResImage'],
-    'ytid': song['ytid'],
-    'isLive': song['isLive'],
-    'isOffline': song['isOffline'],
-    'artWorkPath': song['highResImage'].toString(),
-  },
-);
+MediaItem mapToMediaItem(Map song) {
+  final ytid = song['ytid']?.toString();
+  final offlineSong = ytid != null
+      ? getOfflineSongByYtid(ytid)
+      : <String, dynamic>{};
+  final isOffline = offlineSong.isNotEmpty;
+
+  final artUri = isOffline && offlineSong['artworkPath'] != null
+      ? Uri.file(offlineSong['artworkPath'].toString())
+      : Uri.parse(song['highResImage'].toString());
+
+  return MediaItem(
+    id: song['id'].toString(),
+    artist: song['artist'].toString().trim(),
+    title: song['title'].toString(),
+    artUri: artUri,
+    duration: song['duration'] != null
+        ? Duration(seconds: song['duration'])
+        : null,
+    extras: {
+      'lowResImage': song['lowResImage'],
+      'ytid': song['ytid'],
+      'isLive': song['isLive'],
+      'highResImage': song['highResImage'],
+      'artWorkPath':
+          (isOffline ? offlineSong['artworkPath'] : song['highResImage'])
+              ?.toString() ??
+          '',
+    },
+  );
+}
 
 /// Compares two Duration objects with tolerance for minor differences.
 ///

@@ -23,15 +23,17 @@ import 'dart:async';
 
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
-import 'package:musify/API/musify.dart';
+import 'package:go_router/go_router.dart';
+import 'package:musify/constants/app_constants.dart';
 import 'package:musify/extensions/l10n.dart';
 import 'package:musify/main.dart';
 import 'package:musify/screens/playlist_page.dart';
 import 'package:musify/screens/search_page.dart';
+import 'package:musify/services/common_services.dart';
+import 'package:musify/services/playlists_manager.dart';
 import 'package:musify/services/settings_manager.dart';
+import 'package:musify/utilities/app_utils.dart';
 import 'package:musify/utilities/async_loader.dart';
-import 'package:musify/utilities/common_variables.dart';
-import 'package:musify/utilities/utils.dart';
 import 'package:musify/widgets/announcement_box.dart';
 import 'package:musify/widgets/playlist_cube.dart';
 import 'package:musify/widgets/section_header.dart';
@@ -133,10 +135,20 @@ class _HomePageState extends State<HomePage> {
               valueListenable: announcementURL,
               builder: (_, _url, __) {
                 if (_url == null) return const SizedBox.shrink();
+                final isSponsorshipAnnouncement = isSponsorshipAnnouncementUrl(
+                  _url,
+                );
+                final _message = isSponsorshipAnnouncement
+                    ? context.l10n!.sponsorProject
+                    : context.l10n!.newAnnouncement;
+                final _icon = isSponsorshipAnnouncement
+                    ? FluentIcons.heart_24_filled
+                    : FluentIcons.megaphone_24_filled;
 
                 return AnnouncementBox(
-                  message: context.l10n!.newAnnouncement,
+                  message: _message,
                   url: _url,
+                  icon: _icon,
                   onDismiss: () async {
                     announcementURL.value = null;
                   },
@@ -145,6 +157,7 @@ class _HomePageState extends State<HomePage> {
             ),
             _buildSuggestedPlaylists(playlistHeight),
             _buildSuggestedPlaylists(playlistHeight, showOnlyLiked: true),
+            _buildMostPlayedSection(),
             _buildRecommendedSongsSection(),
           ],
         ),
@@ -202,13 +215,7 @@ class _HomePageState extends State<HomePage> {
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8),
           child: GestureDetector(
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) =>
-                    PlaylistPage(playlistId: playlist['ytid']),
-              ),
-            ),
+            onTap: () => context.push('/home/playlist/${playlist['ytid']}'),
             child: PlaylistCube(playlist, size: height),
           ),
         );
@@ -224,13 +231,8 @@ class _HomePageState extends State<HomePage> {
     return CarouselView.weighted(
       flexWeights: const <int>[3, 2, 1],
       itemSnapping: true,
-      onTap: (index) => Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) =>
-              PlaylistPage(playlistId: playlists[index]['ytid']),
-        ),
-      ),
+      onTap: (index) =>
+          context.push('/home/playlist/${playlists[index]['ytid']}'),
       children: List.generate(itemCount, (index) {
         return PlaylistCube(playlists[index], size: height * 2);
       }),
@@ -247,6 +249,73 @@ class _HomePageState extends State<HomePage> {
           builder: (context, data) {
             if (data.isEmpty) return const SizedBox.shrink();
             return _buildRecommendedForYouSection(context, data);
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildMostPlayedSection() {
+    final sectionTitle = context.l10n!.mostPlayed;
+
+    return ValueListenableBuilder<int>(
+      valueListenable: currentRecentlyPlayedLength,
+      builder: (_, __, ___) {
+        return ValueListenableBuilder<int>(
+          valueListenable: recentlyPlayedVersion,
+          builder: (_, __, ___) {
+            final mostPlayedSongs = getMostPlayed(limit: 5);
+            if (mostPlayedSongs.isEmpty) {
+              return const SizedBox.shrink();
+            }
+
+            return Column(
+              children: [
+                SectionHeader(
+                  title: sectionTitle,
+                  icon: FluentIcons.music_note_2_24_filled,
+                  actionButton: IconButton(
+                    onPressed: () async {
+                      await audioHandler.playPlaylistSong(
+                        playlist: {
+                          'title': sectionTitle,
+                          'list': mostPlayedSongs,
+                        },
+                        songIndex: 0,
+                      );
+                    },
+                    icon: Icon(
+                      FluentIcons.play_circle_24_filled,
+                      color: Theme.of(context).colorScheme.primary,
+                      size: 30,
+                    ),
+                  ),
+                ),
+                ListView.builder(
+                  shrinkWrap: true,
+                  physics: const BouncingScrollPhysics(),
+                  itemCount: mostPlayedSongs.length,
+                  padding: commonListViewBottomPadding,
+                  itemBuilder: (context, index) {
+                    final borderRadius = getItemBorderRadius(
+                      index,
+                      mostPlayedSongs.length,
+                    );
+                    final song = mostPlayedSongs[index];
+
+                    return RepaintBoundary(
+                      key: listItemKey('home_most_played', index, song),
+                      child: SongBar(
+                        song,
+                        true,
+                        borderRadius: borderRadius,
+                        showPlayTime: true,
+                      ),
+                    );
+                  },
+                ),
+              ],
+            );
           },
         );
       },
@@ -286,7 +355,7 @@ class _HomePageState extends State<HomePage> {
           itemBuilder: (context, index) {
             final borderRadius = getItemBorderRadius(index, data.length);
             return RepaintBoundary(
-              key: ValueKey('song_${data[index]['ytid']}'),
+              key: listItemKey('home_recommended', index, data[index]),
               child: SongBar(data[index], true, borderRadius: borderRadius),
             );
           },

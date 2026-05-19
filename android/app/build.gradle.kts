@@ -29,6 +29,7 @@ val hasReleaseKeystore = releaseKeystoreFile.exists() &&
 android {
     namespace = "com.gokadzev.musify"
     compileSdk = 36
+    ndkVersion = "28.2.13676358"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -99,6 +100,10 @@ android {
                 signingConfigs.getByName("debug")
             }
             isShrinkResources = false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
         getByName("debug") {
             applicationIdSuffix = ".debug"
@@ -114,4 +119,8 @@ flutter {
 dependencies {
     implementation("androidx.media:media:1.7.0")
     implementation(platform("org.jetbrains.kotlin:kotlin-bom:1.9.0"))
+}
+
+afterEvaluate {
+    apply(from = "../no-build-id.gradle")
 }

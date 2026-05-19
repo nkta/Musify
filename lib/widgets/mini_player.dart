@@ -28,7 +28,7 @@ import 'package:musify/main.dart';
 import 'package:musify/models/full_player_state.dart';
 import 'package:musify/models/position_data.dart';
 import 'package:musify/screens/now_playing_page.dart';
-import 'package:musify/widgets/marque.dart';
+import 'package:musify/widgets/marquee.dart';
 import 'package:musify/widgets/song_artwork.dart';
 import 'package:rxdart/rxdart.dart';
 
@@ -44,8 +44,6 @@ class MiniPlayer extends StatelessWidget {
   const MiniPlayer({super.key});
 
   static const double playerHeight = 72;
-  static const double _horizontalMargin = 12;
-  static const double _bottomMargin = 8;
   static const double _borderRadius = 20;
   static const double _artworkSize = 52;
   static const double _artworkRadius = 14;
@@ -54,31 +52,36 @@ class MiniPlayer extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
-    return StreamBuilder<MediaItem?>(
-      stream: audioHandler.mediaItem,
-      builder: (context, mediaSnapshot) {
-        final metadata = mediaSnapshot.data;
-        if (metadata == null) return const SizedBox.shrink();
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
+      child: StreamBuilder<MediaItem?>(
+        stream: audioHandler.mediaItem,
+        builder: (context, mediaSnapshot) {
+          final metadata = mediaSnapshot.data;
+          if (metadata == null) return const SizedBox.shrink();
 
-        return StreamBuilder<FullPlayerState>(
-          stream: _fullPlayerStateStream,
-          builder: (context, stateSnapshot) {
-            final state = stateSnapshot.data;
-            if (state == null) return const SizedBox.shrink();
+          return StreamBuilder<FullPlayerState>(
+            stream: _fullPlayerStateStream,
+            builder: (context, stateSnapshot) {
+              final state = stateSnapshot.data;
+              if (state == null) return const SizedBox.shrink();
 
-            final hasNext =
-                state.queue.length > 1 &&
-                (state.playbackState.queueIndex ?? 0) < state.queue.length - 1;
+              final hasNext =
+                  state.queue.length > 1 &&
+                  (state.playbackState.queueIndex ?? 0) <
+                      state.queue.length - 1;
 
-            return _MiniPlayerBody(
-              colorScheme: colorScheme,
-              metadata: metadata,
-              state: state,
-              hasNext: hasNext,
-            );
-          },
-        );
-      },
+              return _MiniPlayerBody(
+                colorScheme: colorScheme,
+                metadata: metadata,
+                state: state,
+                hasNext: hasNext,
+              );
+            },
+          );
+        },
+      ),
     );
   }
 }
@@ -167,54 +170,63 @@ class _MiniPlayerBodyState extends State<_MiniPlayerBody>
       builder: (context, child) {
         return Transform.scale(
           scale: _scaleAnimation.value,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(
-              MiniPlayer._horizontalMargin,
-              0,
-              MiniPlayer._horizontalMargin,
-              MiniPlayer._bottomMargin,
-            ),
-            child: GestureDetector(
-              onTapDown: (_) => _animationController.forward(),
-              onTapUp: (_) => _animationController.reverse(),
-              onTapCancel: () => _animationController.reverse(),
-              onVerticalDragUpdate: _handleVerticalDrag,
-              onTap: _navigateToNowPlaying,
-              child: Container(
-                height: MiniPlayer.playerHeight,
-                decoration: BoxDecoration(
-                  color: colorScheme.surfaceContainerHigh,
-                  borderRadius: BorderRadius.circular(MiniPlayer._borderRadius),
-                  boxShadow: [
-                    BoxShadow(
-                      color: colorScheme.shadow.withValues(alpha: 0.08),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(MiniPlayer._borderRadius),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                    child: Row(
-                      children: [
-                        _ArtworkWidget(metadata: metadata),
-                        Expanded(
-                          child: _MetadataWidget(
-                            title: metadata.title,
-                            artist: metadata.artist,
-                            colorScheme: colorScheme,
+          child: GestureDetector(
+            onTapDown: (_) => _animationController.forward(),
+            onTapUp: (_) => _animationController.reverse(),
+            onTapCancel: () => _animationController.reverse(),
+            onVerticalDragUpdate: _handleVerticalDrag,
+            onTap: _navigateToNowPlaying,
+            child: Container(
+              height: MiniPlayer.playerHeight,
+              decoration: BoxDecoration(
+                color: colorScheme.surfaceContainerHigh,
+                boxShadow: [
+                  BoxShadow(
+                    color: colorScheme.shadow.withValues(alpha: 0.08),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(MiniPlayer._borderRadius),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  child: Row(
+                    children: [
+                      _ArtworkWidget(metadata: metadata),
+                      Expanded(
+                        child: AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 300),
+                          switchInCurve: Curves.easeIn,
+                          switchOutCurve: Curves.easeOut,
+                          layoutBuilder: (currentChild, previousChildren) =>
+                              Stack(
+                                alignment: Alignment.centerLeft,
+                                children: [
+                                  ...previousChildren,
+                                  if (currentChild != null) currentChild,
+                                ],
+                              ),
+                          transitionBuilder: (child, animation) =>
+                              FadeTransition(opacity: animation, child: child),
+                          child: KeyedSubtree(
+                            key: ValueKey(metadata.id),
+                            child: _MetadataWidget(
+                              title: metadata.title,
+                              artist: metadata.artist,
+                              colorScheme: colorScheme,
+                            ),
                           ),
                         ),
-                        _ControlsWidget(
-                          colorScheme: colorScheme,
-                          playbackState: state.playbackState,
-                          hasNext: widget.hasNext,
-                          progress: progress,
-                        ),
-                      ],
-                    ),
+                      ),
+                      _ControlsWidget(
+                        colorScheme: colorScheme,
+                        playbackState: state.playbackState,
+                        hasNext: widget.hasNext,
+                        progress: progress,
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -341,6 +353,8 @@ class _ControlsWidget extends StatelessWidget {
           const SizedBox(width: 4),
           IconButton(
             onPressed: audioHandler.skipToNext,
+            splashColor: Colors.transparent,
+            highlightColor: Colors.transparent,
             icon: Icon(
               FluentIcons.next_24_filled,
               color: colorScheme.onSurfaceVariant,
@@ -401,8 +415,10 @@ class _CircularPlayButton extends StatelessWidget {
           else
             IconButton(
               onPressed: isCompleted
-                  ? () => audioHandler.seek(Duration.zero)
+                  ? () => audioHandler.playAgain()
                   : (isPlaying ? audioHandler.pause : audioHandler.play),
+              splashColor: Colors.transparent,
+              highlightColor: Colors.transparent,
               icon: Icon(
                 isCompleted
                     ? FluentIcons.arrow_counterclockwise_24_filled

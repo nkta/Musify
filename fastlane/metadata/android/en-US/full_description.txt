@@ -6,8 +6,9 @@
 * Add custom playlists with link
 * Optimized sound experience
 * SponsorBlock support
+* Built-in equalizer with presets
 * Lyrics support
 * No ads
 * No subscriptions
-* 22 supported languages
+* 21 supported languages
 * Material UI & accent colors & dynamic colors (Android 12+)
