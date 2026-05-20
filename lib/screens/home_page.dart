@@ -27,7 +27,6 @@ import 'package:go_router/go_router.dart';
 import 'package:musify/constants/app_constants.dart';
 import 'package:musify/extensions/l10n.dart';
 import 'package:musify/main.dart';
-import 'package:musify/screens/playlist_page.dart';
 import 'package:musify/screens/search_page.dart';
 import 'package:musify/services/common_services.dart';
 import 'package:musify/services/playlists_manager.dart';
@@ -38,7 +37,6 @@ import 'package:musify/widgets/announcement_box.dart';
 import 'package:musify/widgets/playlist_cube.dart';
 import 'package:musify/widgets/section_header.dart';
 import 'package:musify/widgets/song_bar.dart';
-import 'package:musify/widgets/spinner.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 
 class HomePage extends StatefulWidget {
@@ -49,28 +47,35 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  StreamSubscription<List<SharedMediaFile>>? _intentDataStreamSubscription;
+  StreamSubscription<String>? _intentDataStreamSubscription;
 
   @override
   void initState() {
     super.initState();
-    final sharingIntent = ReceiveSharingIntent.instance;
 
     // Handle shares delivered while the app is running
-    _intentDataStreamSubscription = sharingIntent.getMediaStream().listen(
-      _handleSharedMedia,
+    _intentDataStreamSubscription = ReceiveSharingIntent.getTextStream().listen(
+      handleSharedText,
       onError: (error, stackTrace) {
-        logger.log('receive_sharing_intent stream error', error, stackTrace);
+        logger.log(
+          'receive_sharing_intent stream error',
+          error: error,
+          stackTrace: stackTrace,
+        );
       },
     );
 
     // Handle shares that opened the app
-    sharingIntent.getInitialMedia().then(_handleSharedMedia).catchError(
+    ReceiveSharingIntent.getInitialText().then((value) {
+      if (value != null && value.isNotEmpty) {
+        handleSharedText(value);
+      }
+    }).catchError(
       (error, stackTrace) {
         logger.log(
-          'receive_sharing_intent initial media error',
-          error,
-          stackTrace,
+          'receive_sharing_intent initial text error',
+          error: error,
+          stackTrace: stackTrace,
         );
       },
     );
@@ -84,42 +89,13 @@ class _HomePageState extends State<HomePage> {
 
   void handleSharedText(String sharedText) {
     if (!mounted) return;
+    ReceiveSharingIntent.reset();
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => SearchPage(query: sharedText),
       ),
     );
-  }
-
-  void _handleSharedMedia(List<SharedMediaFile> mediaFiles) {
-    if (!mounted || mediaFiles.isEmpty) return;
-
-    final shared = _extractSharedText(mediaFiles);
-    if (shared == null) return;
-
-    final message = shared.message?.trim();
-    final pathText = shared.path.trim();
-    final sharedText = (message != null && message.isNotEmpty)
-        ? message
-        : pathText;
-
-    if (sharedText.isEmpty) return;
-
-    unawaited(ReceiveSharingIntent.instance.reset());
-    handleSharedText(sharedText);
-  }
-
-  SharedMediaFile? _extractSharedText(List<SharedMediaFile> mediaFiles) {
-    for (final media in mediaFiles) {
-      final isTextType = media.type == SharedMediaType.text ||
-          media.type == SharedMediaType.url;
-      final isTextMime = media.mimeType?.startsWith('text/') ?? false;
-      if (isTextType || isTextMime) {
-        return media;
-      }
-    }
-    return null;
   }
 
   @override

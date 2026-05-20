@@ -32,10 +32,8 @@ import 'package:musify/services/data_manager.dart';
 import 'package:musify/services/playlists_manager.dart';
 import 'package:musify/services/proxy_manager.dart';
 import 'package:musify/utilities/app_utils.dart';
-import 'package:musify/utilities/common_variables.dart';
 import 'package:musify/utilities/flutter_toast.dart';
 import 'package:musify/utilities/formatter.dart';
-import 'package:musify/utilities/utils.dart';
 import 'package:musify/widgets/confirmation_dialog.dart';
 import 'package:musify/widgets/custom_bar.dart';
 import 'package:musify/widgets/custom_search_bar.dart';
@@ -154,7 +152,7 @@ class _SearchPageState extends State<SearchPage> {
           await audioHandler.playSong(song);
           _clearSearch();
         } catch (e, stackTrace) {
-          logger.log('Error while playing YouTube URL', e, stackTrace);
+          logger.log('Error while playing YouTube URL', error: e, stackTrace: stackTrace);
           if (mounted) {
             showToast(context, context.l10n!.error);
           }

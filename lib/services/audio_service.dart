@@ -241,7 +241,7 @@ class MusifyAudioHandler extends BaseAudioHandler {
     _positionTrackingSubscription = audioPlayer.positionStream.listen(
       _maybePersistPlaybackState,
       onError: (error, stackTrace) {
-        logger.log('Position stream error', error, stackTrace);
+        logger.log('Position stream error', error: error, stackTrace: stackTrace);
       },
     );
   }
@@ -288,7 +288,7 @@ class MusifyAudioHandler extends BaseAudioHandler {
     try {
       await addOrUpdateData('user', _lastPlaybackStorageKey, payload);
     } catch (e, stackTrace) {
-      logger.log('Error persisting playback state', e, stackTrace);
+      logger.log('Error persisting playback state', error: e, stackTrace: stackTrace);
     }
   }
 
@@ -367,7 +367,7 @@ class MusifyAudioHandler extends BaseAudioHandler {
         Duration(milliseconds: savedPositionMs),
       );
     } catch (e, stackTrace) {
-      logger.log('Error restoring last playback state', e, stackTrace);
+      logger.log('Error restoring last playback state', error: e, stackTrace: stackTrace);
     } finally {
       _isRestoringPlayback = false;
     }
@@ -394,12 +394,10 @@ class MusifyAudioHandler extends BaseAudioHandler {
   Future<void> _prepareSongForResume(Map song, Duration position) async {
     try {
       final isOffline = song['isOffline'] ?? false;
-      final songUrl = await _getSongUrl(song, isOffline);
+      final songUrl = await _getPlaybackUrl(song, isOffline);
       if (songUrl == null || songUrl.isEmpty) {
         logger.log(
           'Resume: Failed to get song URL for ${song['ytid']}',
-          null,
-          null,
         );
         return;
       }
@@ -408,8 +406,6 @@ class MusifyAudioHandler extends BaseAudioHandler {
       if (audioSource == null) {
         logger.log(
           'Resume: Failed to build audio source for ${song['ytid']}',
-          null,
-          null,
         );
         return;
       }
@@ -424,7 +420,7 @@ class MusifyAudioHandler extends BaseAudioHandler {
 
       _updatePlaybackState();
     } catch (e, stackTrace) {
-      logger.log('Error preparing song for resume', e, stackTrace);
+      logger.log('Error preparing song for resume', error: e, stackTrace: stackTrace);
     }
   }
 
@@ -1260,13 +1256,9 @@ class MusifyAudioHandler extends BaseAudioHandler {
 
       final success = await playSong(
         _queueList[index],
-<<<<<<< HEAD
         fromQueue: true,
         mediaId: uniqueId,
-=======
-        mediaId: uniqueId,
         transitionId: currentTransitionId,
->>>>>>> upstream/master
       );
 
       // Only process result if this is still the current transition
@@ -1274,19 +1266,16 @@ class MusifyAudioHandler extends BaseAudioHandler {
         if (success) {
           _consecutiveErrors = 0;
           _preloadUpcomingSongs();
-<<<<<<< HEAD
           unawaited(
             _persistPlaybackState(
               force: true,
               position: Duration.zero,
             ),
           );
-=======
           // Trigger background song addition if auto-play is enabled
           if (playNextSongAutomatically.value) {
             unawaited(_backgroundAddSongsToQueue());
           }
->>>>>>> upstream/master
         } else {
           // Restore previous index on failure
           _currentQueueIndex = previousQueueIndex;
@@ -1502,16 +1491,7 @@ class MusifyAudioHandler extends BaseAudioHandler {
   Future<void> rewind() =>
       seek(Duration(seconds: audioPlayer.position.inSeconds - 15));
 
-<<<<<<< HEAD
-  Future<bool> playSong(
-    Map song, {
-    bool fromQueue = false,
-    bool resetQueue = true,
-    String? mediaId,
-  }) async {
-=======
   Future<bool> _resolveOfflineAndSetPaths(Map songData) async {
->>>>>>> upstream/master
     try {
       final ytid = songData['ytid']?.toString();
       if (ytid != null && ytid.isNotEmpty) {
@@ -1556,7 +1536,13 @@ class MusifyAudioHandler extends BaseAudioHandler {
     return transitionId != null && transitionId != _currentLoadingTransitionId;
   }
 
-  Future<bool> playSong(Map song, {String? mediaId, int? transitionId}) async {
+  Future<bool> playSong(
+    Map song, {
+    bool fromQueue = false,
+    bool resetQueue = true,
+    String? mediaId,
+    int? transitionId,
+  }) async {
     try {
       final songData = cloneMap(song);
 
@@ -1633,13 +1619,8 @@ class MusifyAudioHandler extends BaseAudioHandler {
         return false;
       }
 
-<<<<<<< HEAD
       final success = await _setAudioSourceAndPlay(
-        song,
-=======
-      return await _setAudioSourceAndPlay(
         songData,
->>>>>>> upstream/master
         audioSource,
         playback.songUrl,
         playback.isOffline,

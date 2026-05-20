@@ -20,6 +20,7 @@
  */
 
 import 'dart:async';
+import 'dart:math';
 
 import 'package:audio_service/audio_service.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
