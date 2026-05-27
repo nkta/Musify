@@ -1542,6 +1542,7 @@ class MusifyAudioHandler extends BaseAudioHandler {
     bool resetQueue = true,
     String? mediaId,
     int? transitionId,
+    Duration? initialPosition,
   }) async {
     try {
       final songData = cloneMap(song);
@@ -1626,13 +1627,14 @@ class MusifyAudioHandler extends BaseAudioHandler {
         playback.isOffline,
         mediaId: mediaId,
         transitionId: transitionId,
+        initialPosition: initialPosition,
       );
 
       if (success && !fromQueue) {
         unawaited(
           _persistPlaybackState(
             force: true,
-            position: Duration.zero,
+            position: initialPosition ?? Duration.zero,
           ),
         );
       }
@@ -1736,6 +1738,7 @@ class MusifyAudioHandler extends BaseAudioHandler {
     String? mediaId,
     bool allowOnlineRetry = true,
     int? transitionId,
+    Duration? initialPosition,
   }) async {
     try {
       // Final staleness check before we touch the audio player.
@@ -1754,6 +1757,10 @@ class MusifyAudioHandler extends BaseAudioHandler {
       if (_isStaleTransition(transitionId)) {
         unawaited(audioPlayer.stop());
         return false;
+      }
+
+      if (initialPosition != null && initialPosition > Duration.zero) {
+        await audioPlayer.seek(initialPosition);
       }
 
       if (audioPlayer.duration != null) {
@@ -1803,6 +1810,7 @@ class MusifyAudioHandler extends BaseAudioHandler {
           song,
           mediaId: mediaId,
           transitionId: transitionId,
+          initialPosition: initialPosition,
         );
       }
 
@@ -1837,6 +1845,7 @@ class MusifyAudioHandler extends BaseAudioHandler {
                 mediaId: mediaId,
                 allowOnlineRetry: false,
                 transitionId: transitionId,
+                initialPosition: initialPosition,
               );
             }
           }
@@ -1852,6 +1861,7 @@ class MusifyAudioHandler extends BaseAudioHandler {
     Map song, {
     String? mediaId,
     int? transitionId,
+    Duration? initialPosition,
   }) async {
     // Do not attempt any network calls when offline mode is enabled.
     if (offlineMode.value) return false;
@@ -1870,6 +1880,7 @@ class MusifyAudioHandler extends BaseAudioHandler {
           false,
           mediaId: mediaId,
           transitionId: transitionId,
+          initialPosition: initialPosition,
         );
       }
     }

@@ -34,6 +34,7 @@ import 'package:musify/services/proxy_manager.dart';
 import 'package:musify/utilities/app_utils.dart';
 import 'package:musify/utilities/flutter_toast.dart';
 import 'package:musify/utilities/formatter.dart';
+import 'package:musify/utilities/sharing_intent.dart';
 import 'package:musify/widgets/confirmation_dialog.dart';
 import 'package:musify/widgets/custom_bar.dart';
 import 'package:musify/widgets/custom_search_bar.dart';
@@ -149,7 +150,17 @@ class _SearchPageState extends State<SearchPage> {
           final yt = ProxyManager().getClientSync();
           final video = await yt.videos.get(videoId);
           final song = returnSongLayout(0, video);
-          await audioHandler.playSong(song);
+          Duration? startPosition;
+          try {
+            final uri = Uri.tryParse(query);
+            if (uri != null) {
+              final timeParam = uri.queryParameters['t'] ?? uri.queryParameters['start'];
+              if (timeParam != null) {
+                startPosition = parseYoutubeTimecode(timeParam);
+              }
+            }
+          } catch (_) {}
+          await audioHandler.playSong(song, initialPosition: startPosition);
           _clearSearch();
         } catch (e, stackTrace) {
           logger.log('Error while playing YouTube URL', error: e, stackTrace: stackTrace);

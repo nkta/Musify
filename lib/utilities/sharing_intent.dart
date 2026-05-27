@@ -25,6 +25,37 @@ import 'package:musify/utilities/formatter.dart';
 
 final _youtubeLinkRegex = RegExp(r'(youtube\.com|youtu\.be)');
 
+Duration? parseYoutubeTimecode(String? timecode) {
+  if (timecode == null || timecode.isEmpty) return null;
+
+  final intSeconds = int.tryParse(timecode);
+  if (intSeconds != null) {
+    return Duration(seconds: intSeconds);
+  }
+
+  if (timecode.endsWith('s')) {
+    final sWithoutS = timecode.substring(0, timecode.length - 1);
+    final intSecondsWithoutS = int.tryParse(sWithoutS);
+    if (intSecondsWithoutS != null) {
+      return Duration(seconds: intSecondsWithoutS);
+    }
+  }
+
+  final regex = RegExp(r'^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$');
+  final match = regex.firstMatch(timecode);
+  if (match != null &&
+      (match.group(1) != null ||
+          match.group(2) != null ||
+          match.group(3) != null)) {
+    final hours = int.tryParse(match.group(1) ?? '0') ?? 0;
+    final minutes = int.tryParse(match.group(2) ?? '0') ?? 0;
+    final seconds = int.tryParse(match.group(3) ?? '0') ?? 0;
+    return Duration(hours: hours, minutes: minutes, seconds: seconds);
+  }
+
+  return null;
+}
+
 Future<void> handleYoutubeSharedTextIntent(
   String? value, {
   required MusifyAudioHandler audioHandler,
@@ -39,9 +70,28 @@ Future<void> handleYoutubeSharedTextIntent(
     return;
   }
 
+  Duration? startPosition;
+  try {
+    final urlRegex = RegExp(
+      r'(https?://(?:www\.)?(?:youtube\.com|youtu\.be)/[^\s]+)',
+      caseSensitive: false,
+    );
+    final match = urlRegex.firstMatch(value);
+    if (match != null) {
+      final url = match.group(0)!;
+      final uri = Uri.tryParse(url);
+      if (uri != null) {
+        final timeParam = uri.queryParameters['t'] ?? uri.queryParameters['start'];
+        if (timeParam != null) {
+          startPosition = parseYoutubeTimecode(timeParam);
+        }
+      }
+    }
+  } catch (_) {}
+
   try {
     final song = await getSongDetails(0, songId);
-    await audioHandler.playSong(song);
+    await audioHandler.playSong(song, initialPosition: startPosition);
   } catch (e, stackTrace) {
     onError(e, stackTrace);
   }
