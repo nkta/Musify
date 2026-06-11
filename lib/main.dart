@@ -270,6 +270,15 @@ Future<void> initialisation() async {
         androidNotificationIcon: 'drawable/ic_launcher_foreground',
         androidShowNotificationBadge: true,
         androidStopForegroundOnPause: false,
+        androidBrowsableRootExtras: {
+          // Enables the search icon in Android Auto (routed to search()).
+          'android.media.browse.SEARCH_SUPPORTED': true,
+          AndroidContentStyle.supportedKey: true,
+          AndroidContentStyle.browsableHintKey:
+              AndroidContentStyle.listItemHintValue,
+          AndroidContentStyle.playableHintKey:
+              AndroidContentStyle.listItemHintValue,
+        },
       ),
     );
 

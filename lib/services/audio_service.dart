@@ -21,15 +21,18 @@
 
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' show Locale;
 
 import 'package:audio_service/audio_service.dart';
 import 'package:audio_session/audio_session.dart';
 import 'package:hive/hive.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:musify/localization/app_localizations.dart';
 import 'package:musify/main.dart';
 import 'package:musify/models/position_data.dart';
 import 'package:musify/services/common_services.dart';
 import 'package:musify/services/data_manager.dart';
+import 'package:musify/services/playlists_manager.dart';
 import 'package:musify/services/settings_manager.dart';
 import 'package:musify/utilities/map_utils.dart';
 import 'package:musify/utilities/mediaitem.dart';
@@ -2339,6 +2342,342 @@ class MusifyAudioHandler extends BaseAudioHandler {
     if (song == null) return null;
     final id = song['ytid'] ?? song['id'];
     return id?.toString();
+  }
+
+  // ----- Android Auto / MediaBrowser support -----
+
+  static const String _autoLikedId = '__liked__';
+  static const String _autoPlaylistsId = '__playlists__';
+  static const String _autoRecentId = '__recent__';
+  static const String _autoOfflineId = '__offline__';
+  static const String _autoPlaylistPrefix = '__playlist__:';
+  static const String _autoSongPrefix = '__song__';
+  static const String _autoSearchId = '__search__';
+  static const String _autoYtPlaylistsCacheKey = 'autoYtPlaylistsMeta';
+
+  // Song lists handed out to the media browser, keyed by parent media id, so
+  // playFromMediaId can rebuild the same queue context the user browsed.
+  final Map<String, List<Map>> _autoSongLists = {};
+
+  AppLocalizations get _autoLabels {
+    try {
+      return lookupAppLocalizations(languageSetting);
+    } catch (_) {
+      return lookupAppLocalizations(const Locale('en'));
+    }
+  }
+
+  @override
+  Future<List<MediaItem>> getChildren(
+    String parentMediaId, [
+    Map<String, dynamic>? options,
+  ]) async {
+    try {
+      switch (parentMediaId) {
+        case AudioService.browsableRootId:
+          return _autoRootItems();
+        case AudioService.recentRootId:
+        case _autoRecentId:
+          return _autoSongItems(
+            _autoRecentId,
+            List<Map>.from(userRecentlyPlayed.whereType<Map>()),
+          );
+        case _autoLikedId:
+          return _autoSongItems(
+            _autoLikedId,
+            List<Map>.from(userLikedSongsList.whereType<Map>()),
+          );
+        case _autoOfflineId:
+          return _autoSongItems(
+            _autoOfflineId,
+            List<Map>.from(userOfflineSongs.whereType<Map>()),
+          );
+        case _autoPlaylistsId:
+          return _autoPlaylistItems();
+        default:
+          if (parentMediaId.startsWith(_autoPlaylistPrefix)) {
+            return _autoPlaylistSongs(parentMediaId);
+          }
+          return [];
+      }
+    } catch (e, stackTrace) {
+      logger.log(
+        'Error getting media browser children for $parentMediaId',
+        error: e,
+        stackTrace: stackTrace,
+      );
+      return [];
+    }
+  }
+
+  List<MediaItem> _autoRootItems() {
+    final labels = _autoLabels;
+    return [
+      MediaItem(id: _autoLikedId, title: labels.likedSongs, playable: false),
+      MediaItem(id: _autoPlaylistsId, title: labels.playlists, playable: false),
+      MediaItem(
+        id: _autoRecentId,
+        title: labels.recentlyPlayed,
+        playable: false,
+      ),
+      MediaItem(
+        id: _autoOfflineId,
+        title: labels.offlineSongs,
+        playable: false,
+      ),
+    ];
+  }
+
+  List<MediaItem> _autoSongItems(String parentId, List<Map> songs) {
+    final validSongs = songs
+        .where(
+          (song) =>
+              song['ytid'] != null && song['ytid'].toString().isNotEmpty,
+        )
+        .toList();
+    _autoSongLists[parentId] = validSongs;
+
+    return [
+      for (var i = 0; i < validSongs.length; i++)
+        mapToMediaItem(validSongs[i]).copyWith(
+          id: '$_autoSongPrefix|$parentId|$i|${validSongs[i]['ytid']}',
+        ),
+    ];
+  }
+
+  Future<List<MediaItem>> _autoPlaylistItems() async {
+    final items = <MediaItem>[];
+    final seen = <String>{};
+
+    void addPlaylist(Map playlist) {
+      final id = playlist['ytid']?.toString();
+      if (id == null || id.isEmpty || !seen.add(id)) return;
+
+      final image = playlist['image']?.toString();
+      items.add(
+        MediaItem(
+          id: '$_autoPlaylistPrefix$id',
+          title: playlist['title']?.toString() ?? '',
+          artUri: image != null && image.startsWith('http')
+              ? Uri.tryParse(image)
+              : null,
+          playable: false,
+        ),
+      );
+    }
+
+    getUserCustomPlaylists().forEach(addPlaylist);
+    userLikedPlaylists.forEach(addPlaylist);
+
+    // YouTube playlist metadata requires one network call per playlist.
+    // Android Auto drops children that arrive too late, so serve cached
+    // metadata instantly when complete and refresh it in the background;
+    // only block (briefly) when some playlists were never cached.
+    final ytPlaylistIds = userPlaylists.value;
+    if (ytPlaylistIds.isNotEmpty && !offlineMode.value) {
+      final cached = await getData('cache', _autoYtPlaylistsCacheKey);
+      final cachedMaps = cached is List
+          ? List<Map>.from(cached.whereType<Map>())
+          : <Map>[];
+      final cachedIds = cachedMaps
+          .map((playlist) => playlist['ytid'].toString())
+          .toSet();
+
+      if (ytPlaylistIds.every(cachedIds.contains)) {
+        for (final playlist in cachedMaps) {
+          if (ytPlaylistIds.contains(playlist['ytid'].toString())) {
+            addPlaylist(playlist);
+          }
+        }
+        unawaited(_refreshAutoYtPlaylistsCache());
+      } else {
+        try {
+          final remoteMaps = await _refreshAutoYtPlaylistsCache().timeout(
+            const Duration(seconds: 6),
+          );
+          remoteMaps.forEach(addPlaylist);
+        } catch (e, stackTrace) {
+          logger.log(
+            'Error fetching remote playlists for media browser',
+            error: e,
+            stackTrace: stackTrace,
+          );
+          cachedMaps.forEach(addPlaylist);
+        }
+      }
+    }
+
+    return items;
+  }
+
+  Future<List<Map>> _refreshAutoYtPlaylistsCache() async {
+    final remote = await getUserPlaylists();
+    final remoteMaps = List<Map>.from(remote.whereType<Map>());
+    final validMaps = remoteMaps
+        .where((playlist) => playlist['title'] != 'Failed playlist')
+        .toList();
+    if (validMaps.isNotEmpty) {
+      unawaited(
+        addOrUpdateData('cache', _autoYtPlaylistsCacheKey, validMaps),
+      );
+    }
+    return remoteMaps;
+  }
+
+  Future<List<MediaItem>> _autoPlaylistSongs(String parentMediaId) async {
+    final playlistId = parentMediaId.substring(_autoPlaylistPrefix.length);
+
+    final customPlaylist = getUserCustomPlaylists().firstWhere(
+      (playlist) => playlist['ytid']?.toString() == playlistId,
+      orElse: () => <String, dynamic>{},
+    );
+
+    List songs;
+    if (customPlaylist.isNotEmpty) {
+      songs = customPlaylist['list'] as List? ?? [];
+    } else {
+      final likedPlaylist = userLikedPlaylists.firstWhere(
+        (playlist) => playlist['ytid']?.toString() == playlistId,
+        orElse: () => <String, dynamic>{},
+      );
+      // The fetch keeps running after the timeout and fills the Hive cache,
+      // so a retry from the car display will succeed instantly.
+      songs = await getSongsFromPlaylist(
+        playlistId,
+        playlistImage: likedPlaylist['image']?.toString(),
+      ).timeout(const Duration(seconds: 8), onTimeout: () => []);
+    }
+
+    return _autoSongItems(
+      parentMediaId,
+      List<Map>.from(songs.whereType<Map>()),
+    );
+  }
+
+  Future<List<Map>?> _autoResolveSongList(String parentId) async {
+    final cached = _autoSongLists[parentId];
+    if (cached != null && cached.isNotEmpty) return cached;
+
+    switch (parentId) {
+      case _autoLikedId:
+        return List<Map>.from(userLikedSongsList.whereType<Map>());
+      case _autoRecentId:
+        return List<Map>.from(userRecentlyPlayed.whereType<Map>());
+      case _autoOfflineId:
+        return List<Map>.from(userOfflineSongs.whereType<Map>());
+    }
+
+    if (parentId.startsWith(_autoPlaylistPrefix)) {
+      await _autoPlaylistSongs(parentId);
+      return _autoSongLists[parentId];
+    }
+
+    return null;
+  }
+
+  @override
+  Future<void> playFromMediaId(
+    String mediaId, [
+    Map<String, dynamic>? extras,
+  ]) async {
+    try {
+      final parts = mediaId.split('|');
+      if (parts.length >= 4 && parts[0] == _autoSongPrefix) {
+        final parentId = parts[1];
+        final index = int.tryParse(parts[2]);
+        final ytid = parts[3];
+
+        final songs = await _autoResolveSongList(parentId);
+        if (songs != null && songs.isNotEmpty) {
+          var startIndex = index != null &&
+                  index >= 0 &&
+                  index < songs.length &&
+                  songs[index]['ytid']?.toString() == ytid
+              ? index
+              : songs.indexWhere((song) => song['ytid']?.toString() == ytid);
+          if (startIndex < 0) startIndex = 0;
+
+          await addPlaylistToQueue(
+            List<Map>.from(songs),
+            replace: true,
+            startIndex: startIndex,
+          );
+          return;
+        }
+      }
+
+      logger.log('playFromMediaId: unknown media id "$mediaId"');
+    } catch (e, stackTrace) {
+      logger.log(
+        'Error in playFromMediaId',
+        error: e,
+        stackTrace: stackTrace,
+      );
+    }
+  }
+
+  @override
+  Future<List<MediaItem>> search(
+    String query, [
+    Map<String, dynamic>? extras,
+  ]) async {
+    try {
+      final trimmedQuery = query.trim();
+      if (trimmedQuery.isEmpty) return [];
+
+      final results = await fetchSongsList(
+        trimmedQuery,
+      ).timeout(const Duration(seconds: 8));
+      return _autoSongItems(
+        _autoSearchId,
+        List<Map>.from(results.whereType<Map>()),
+      );
+    } catch (e, stackTrace) {
+      logger.log(
+        'Error in media browser search',
+        error: e,
+        stackTrace: stackTrace,
+      );
+      return [];
+    }
+  }
+
+  @override
+  Future<void> playFromSearch(
+    String query, [
+    Map<String, dynamic>? extras,
+  ]) async {
+    try {
+      final trimmedQuery = query.trim();
+      if (trimmedQuery.isEmpty) {
+        // Voice commands like "play music" arrive with an empty query.
+        if (_queueList.isNotEmpty) {
+          await play();
+        } else if (userRecentlyPlayed.isNotEmpty) {
+          await addPlaylistToQueue(
+            List<Map>.from(userRecentlyPlayed.whereType<Map>()),
+            replace: true,
+            startIndex: 0,
+          );
+        }
+        return;
+      }
+
+      final results = await fetchSongsList(trimmedQuery);
+      final songs = List<Map>.from(results.whereType<Map>());
+      if (songs.isEmpty) {
+        logger.log('playFromSearch: no results for "$trimmedQuery"');
+        return;
+      }
+
+      await addPlaylistToQueue(songs, replace: true, startIndex: 0);
+    } catch (e, stackTrace) {
+      logger.log(
+        'Error in playFromSearch',
+        error: e,
+        stackTrace: stackTrace,
+      );
+    }
   }
 }
 
