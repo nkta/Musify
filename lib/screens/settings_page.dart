@@ -160,6 +160,24 @@ class SettingsPage extends StatelessWidget {
           },
         ),
         ValueListenableBuilder<bool>(
+          valueListenable: rememberPlaybackPosition,
+          builder: (_, value, __) {
+            return CustomBar(
+              context.l10n!.rememberPlaybackPosition,
+              FluentIcons.history_24_regular,
+              description: context.l10n!.rememberPlaybackPositionDescription,
+              trailing: Switch(
+                value: value,
+                onChanged: (value) {
+                  rememberPlaybackPosition.value = value;
+                  addOrUpdateData('settings', 'rememberPlaybackPosition', value);
+                  showToast(context, context.l10n!.settingChangedMsg);
+                },
+              ),
+            );
+          },
+        ),
+        ValueListenableBuilder<bool>(
           valueListenable: offlineMode,
           builder: (_, value, __) {
             return CustomBar(

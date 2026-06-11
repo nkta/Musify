@@ -196,6 +196,8 @@
   "removeSearchQueryQuestion": "Souhaitez-vous supprimer cette requête de recherche ?",
   "removedFromLikedSongs": "Retiré des titres favoris",
   "renameSong": "Renommer le titre",
+  "rememberPlaybackPosition": "Mémoire pour les timecodes",
+  "rememberPlaybackPositionDescription": "Reprendre la lecture des morceaux là où vous vous étiez arrêté.",
   "repeat": "Répéter",
   "replay": "Rejouer",
   "restoreError": "Erreur pendant la restauration",

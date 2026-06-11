@@ -19,11 +19,15 @@
  *     please visit: https://github.com/gokadzev/Musify
  */
 
+import 'dart:async' show unawaited;
+
 import 'package:audio_service/audio_service.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_flip_card/flutter_flip_card.dart';
+
 import 'package:musify/main.dart';
+import 'package:musify/utilities/url_launcher.dart';
 import 'package:musify/widgets/now_playing/bottom_actions_row.dart';
 import 'package:musify/widgets/now_playing/now_playing_artwork.dart';
 import 'package:musify/widgets/now_playing/now_playing_controls.dart';
@@ -65,7 +69,7 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
             final metadata = snapshot.data!;
             return Column(
               children: [
-                _buildAppBar(context, colorScheme),
+                _buildAppBar(context, colorScheme, metadata),
                 Expanded(
                   child: isLargeScreen
                       ? _DesktopLayout(
@@ -92,10 +96,16 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
     );
   }
 
-  Widget _buildAppBar(BuildContext context, ColorScheme colorScheme) {
+  Widget _buildAppBar(
+    BuildContext context,
+    ColorScheme colorScheme,
+    MediaItem metadata,
+  ) {
+    final ytid = metadata.extras?['ytid'];
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           IconButton(
             iconSize: 26,
@@ -108,6 +118,23 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
             ),
             onPressed: () => Navigator.pop(context),
           ),
+          if (ytid != null && ytid.toString().isNotEmpty)
+            IconButton(
+              iconSize: 26,
+              icon: const Icon(FluentIcons.video_clip_24_regular),
+              tooltip: 'YouTube',
+              style: IconButton.styleFrom(
+                backgroundColor: colorScheme.surfaceContainerHighest,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              onPressed: () {
+                unawaited(
+                  launchURL(Uri.parse('https://www.youtube.com/watch?v=$ytid')),
+                );
+              },
+            ),
         ],
       ),
     );

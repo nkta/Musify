@@ -287,6 +287,34 @@ class MusifyAudioHandler extends BaseAudioHandler {
 
     try {
       await addOrUpdateData('user', _lastPlaybackStorageKey, payload);
+
+      if (rememberPlaybackPosition.value) {
+        final currentSong = _queueList[normalizedIndex];
+        final songId = _getSongStorageId(currentSong);
+        if (songId != null) {
+          final currentPosition = position ?? audioPlayer.position;
+          final rawDuration = currentSong['duration'];
+          Duration? duration;
+          if (audioPlayer.duration != null) {
+            duration = audioPlayer.duration;
+          } else if (rawDuration != null) {
+            final seconds = int.tryParse(rawDuration.toString());
+            if (seconds != null) {
+              duration = Duration(seconds: seconds);
+            }
+          }
+
+          if (duration != null &&
+              (currentPosition.inSeconds >= duration.inSeconds - 10 ||
+                  currentPosition.inMilliseconds / duration.inMilliseconds > 0.95)) {
+            unawaited(deleteData('user', 'timecode_$songId'));
+          } else if (currentPosition.inSeconds > 5) {
+            unawaited(addOrUpdateData('user', 'timecode_$songId', currentPosition.inSeconds));
+          } else {
+            unawaited(deleteData('user', 'timecode_$songId'));
+          }
+        }
+      }
     } catch (e, stackTrace) {
       logger.log('Error persisting playback state', error: e, stackTrace: stackTrace);
     }
@@ -797,7 +825,12 @@ class MusifyAudioHandler extends BaseAudioHandler {
   Future<void> _handleSongCompletion() async {
     try {
       if (_currentQueueIndex >= 0 && _currentQueueIndex < _queueList.length) {
-        _addToHistory(_queueList[_currentQueueIndex]);
+        final completedSong = _queueList[_currentQueueIndex];
+        _addToHistory(completedSong);
+        final songId = _getSongStorageId(completedSong);
+        if (songId != null) {
+          unawaited(deleteData('user', 'timecode_$songId'));
+        }
       }
 
       // Determine what to play next based on queue position and repeat mode
@@ -1552,6 +1585,16 @@ class MusifyAudioHandler extends BaseAudioHandler {
         return false;
       }
 
+      if (rememberPlaybackPosition.value && (initialPosition == null || initialPosition == Duration.zero)) {
+        final songId = _getSongStorageId(songData);
+        if (songId != null) {
+          final savedSeconds = await getData('user', 'timecode_$songId');
+          if (savedSeconds is int && savedSeconds > 0) {
+            initialPosition = Duration(seconds: savedSeconds);
+          }
+        }
+      }
+
       if (!fromQueue) {
         if (resetQueue) {
           _queueList
@@ -2290,6 +2333,12 @@ class MusifyAudioHandler extends BaseAudioHandler {
         stackTrace: stackTrace,
       );
     }
+  }
+
+  String? _getSongStorageId(Map? song) {
+    if (song == null) return null;
+    final id = song['ytid'] ?? song['id'];
+    return id?.toString();
   }
 }
 

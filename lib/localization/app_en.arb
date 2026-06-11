@@ -196,6 +196,8 @@
   "removeSearchQueryQuestion": "Are you sure you want to remove this search query?",
   "removedFromLikedSongs": "Removed from liked songs",
   "renameSong": "Rename song",
+  "rememberPlaybackPosition": "Remember playback position",
+  "rememberPlaybackPositionDescription": "Resume songs from where you left off.",
   "repeat": "Repeat",
   "replay": "Replay",
   "restoreError": "Error restoring data",

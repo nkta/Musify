@@ -60,6 +60,10 @@ final externalRecommendations = ValueNotifier<bool>(
   Hive.box('settings').get('externalRecommendations', defaultValue: false),
 );
 
+final rememberPlaybackPosition = ValueNotifier<bool>(
+  Hive.box('settings').get('rememberPlaybackPosition', defaultValue: true),
+);
+
 final useProxy = ValueNotifier<bool>(
   Hive.box('settings').get('useProxy', defaultValue: false),
 );
