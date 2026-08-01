@@ -22,23 +22,30 @@ import 'dart:async';
 
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:musify/constants/app_constants.dart';
+import 'package:musify/database/radio_stations.db.dart';
 import 'package:musify/extensions/l10n.dart';
 import 'package:musify/main.dart';
+import 'package:musify/models/radio_model.dart';
 import 'package:musify/screens/playlist_page.dart';
 import 'package:musify/services/common_services.dart';
 import 'package:musify/services/data_manager.dart';
 import 'package:musify/services/playlists_manager.dart';
 import 'package:musify/services/proxy_manager.dart';
+import 'package:musify/services/router_service.dart';
 import 'package:musify/utilities/app_utils.dart';
 import 'package:musify/utilities/flutter_toast.dart';
 import 'package:musify/utilities/formatter.dart';
 import 'package:musify/utilities/sharing_intent.dart';
+import 'package:musify/widgets/artist_bar.dart';
 import 'package:musify/widgets/confirmation_dialog.dart';
 import 'package:musify/widgets/custom_bar.dart';
 import 'package:musify/widgets/custom_search_bar.dart';
+import 'package:musify/widgets/mini_player_bottom_space.dart';
 import 'package:musify/widgets/playlist_bar.dart';
+import 'package:musify/widgets/radio_station_card.dart';
 import 'package:musify/widgets/section_title.dart';
 import 'package:musify/widgets/song_bar.dart';
 
@@ -64,6 +71,12 @@ set searchHistory(List value) {
   searchHistoryNotifier.value = value;
 }
 
+void reloadSearchHistoryFromStorage() {
+  searchHistoryNotifier.value = Hive.box(
+    'user',
+  ).get('searchHistory', defaultValue: []);
+}
+
 class _SearchPageState extends State<SearchPage> {
   final TextEditingController _searchBar = TextEditingController();
   final FocusNode _inputNode = FocusNode();
@@ -74,8 +87,10 @@ class _SearchPageState extends State<SearchPage> {
   };
   int maxSongsInList = 15;
   List<dynamic> _songsSearchResult = [];
+  List<Map<String, dynamic>> _artistsSearchResult = [];
   List<dynamic> _albumsSearchResult = [];
   List<dynamic> _playlistsSearchResult = [];
+  List<RadioStation> _radioStationsSearchResult = [];
   List<String> _suggestionsList = [];
   Timer? _debounce;
   int _latestSuggestionRequest = 0;
@@ -130,7 +145,13 @@ class _SearchPageState extends State<SearchPage> {
     final query = _searchBar.text;
 
     if (query.isEmpty) {
-      _clearSearch();
+      _songsSearchResult = [];
+      _artistsSearchResult = [];
+      _albumsSearchResult = [];
+      _playlistsSearchResult = [];
+      _radioStationsSearchResult = [];
+      _suggestionsList = [];
+      if (mounted) setState(() {});
       return;
     }
     _fetchingSongs.value = true;
@@ -198,16 +219,37 @@ class _SearchPageState extends State<SearchPage> {
     if (!searchHistory.contains(query)) {
       final updatedHistory = List.from(searchHistory)..insert(0, query);
       searchHistoryNotifier.value = updatedHistory;
-      unawaited(addOrUpdateData('user', 'searchHistory', updatedHistory));
+      unawaited(addOrUpdateData<List>('user', 'searchHistory', updatedHistory));
     }
 
     try {
-      _songsSearchResult = await fetchSongsList(query);
-      _albumsSearchResult = await getPlaylists(query: query, type: 'album');
-      _playlistsSearchResult = await getPlaylists(
-        query: query,
-        type: 'playlist',
-      );
+      final results = await Future.wait<List<dynamic>>([
+        fetchSongsList(query),
+        searchArtists(query),
+        getPlaylists(query: query, type: 'album'),
+        getPlaylists(query: query, type: 'playlist'),
+      ]);
+
+      _songsSearchResult = results[0];
+      _artistsSearchResult = results[1]
+          .whereType<Map>()
+          .map(Map<String, dynamic>.from)
+          .toList();
+      if (_songsSearchResult.isEmpty && _artistsSearchResult.isNotEmpty) {
+        _songsSearchResult = await _fetchSongsForResolvedArtist(query);
+      }
+      _albumsSearchResult = results[2];
+      _playlistsSearchResult = results[3];
+
+      // Filter radio stations by name or genre
+      _radioStationsSearchResult = radioStationsDB
+          .where(
+            (station) =>
+                station.name.toLowerCase().contains(query.toLowerCase()) ||
+                (station.genre?.toLowerCase().contains(query.toLowerCase()) ??
+                    false),
+          )
+          .toList();
     } catch (e, stackTrace) {
       logger.log(
         'Error while searching online songs',
@@ -220,6 +262,24 @@ class _SearchPageState extends State<SearchPage> {
         setState(() {});
       }
     }
+  }
+
+  Future<List<dynamic>> _fetchSongsForResolvedArtist(String query) async {
+    final artistName = _artistsSearchResult.first['title']?.toString().trim();
+    if (artistName == null || artistName.isEmpty) return [];
+
+    final fallbackQueries = <String>{
+      if (artistName.toLowerCase() != query.trim().toLowerCase()) artistName,
+      '$artistName songs',
+      '$artistName music',
+    };
+
+    for (final fallbackQuery in fallbackQueries) {
+      final songs = await fetchSongsList(fallbackQuery);
+      if (songs.isNotEmpty) return songs;
+    }
+
+    return [];
   }
 
   @override
@@ -326,7 +386,13 @@ class _SearchPageState extends State<SearchPage> {
 
             AnimatedSwitcher(
               duration: const Duration(milliseconds: 200),
-              child: (_suggestionsList.isNotEmpty || !hasAnyResults)
+              child:
+                  (_suggestionsList.isNotEmpty ||
+                      (_songsSearchResult.isEmpty &&
+                          _artistsSearchResult.isEmpty &&
+                          _albumsSearchResult.isEmpty &&
+                          _playlistsSearchResult.isEmpty &&
+                          _radioStationsSearchResult.isEmpty))
                   ? ValueListenableBuilder<List>(
                       valueListenable: searchHistoryNotifier,
                       builder: (context, searchHistory, _) {
@@ -369,7 +435,7 @@ class _SearchPageState extends State<SearchPage> {
                                         searchHistoryNotifier.value =
                                             updatedHistory;
                                         unawaited(
-                                          addOrUpdateData(
+                                          addOrUpdateData<List>(
                                             'user',
                                             'searchHistory',
                                             updatedHistory,
@@ -391,6 +457,7 @@ class _SearchPageState extends State<SearchPage> {
                       showPlaylists: showPlaylists,
                     ),
             ),
+            const MiniPlayerBottomSpace(),
           ],
         ),
       ),
@@ -404,6 +471,40 @@ class _SearchPageState extends State<SearchPage> {
     required bool showPlaylists,
   }) {
     final widgets = <Widget>[];
+
+    // Artists section
+    if (_artistsSearchResult.isNotEmpty) {
+      widgets.add(
+        SectionTitle(
+          context.l10n!.artists,
+          primaryColor,
+          icon: FluentIcons.person_24_filled,
+        ),
+      );
+
+      final artists = _artistsSearchResult.take(3).toList();
+      for (var index = 0; index < artists.length; index++) {
+        final artist = Map<String, dynamic>.from(artists[index]);
+        final artistId =
+            artist['ytid']?.toString() ?? artist['title']?.toString() ?? '';
+        if (artistId.isEmpty) continue;
+
+        final borderRadius = getItemBorderRadius(index, artists.length);
+        widgets.add(
+          ArtistBar(
+            key: listItemKey('search_artist', index, artist),
+            artist: artist,
+            borderRadius: borderRadius,
+            onTap: () {
+              context.push(
+                '${NavigationManager.searchPath}/artist/${Uri.encodeComponent(artistId)}',
+                extra: artist,
+              );
+            },
+          ),
+        );
+      }
+    }
 
     // Songs section
     if (showSongs && _songsSearchResult.isNotEmpty) {
@@ -420,12 +521,13 @@ class _SearchPageState extends State<SearchPage> {
           : _songsSearchResult.length;
 
       for (var index = 0; index < songsCount; index++) {
+        final song = _songsSearchResult[index];
         final borderRadius = getItemBorderRadius(index, songsCount);
         widgets.add(
           SongBar(
-            _songsSearchResult[index],
+            song,
             true,
-            key: listItemKey('search_song', index, _songsSearchResult[index]),
+            key: listItemKey('search_song', index, song),
             showMusicDuration: true,
             borderRadius: borderRadius,
           ),
@@ -482,6 +584,7 @@ class _SearchPageState extends State<SearchPage> {
       for (var index = 0; index < playlistsCount; index++) {
         final playlist = _playlistsSearchResult[index];
         final isLast = index == playlistsCount - 1;
+        final borderRadius = getItemBorderRadius(index, playlistsCount);
 
         widgets.add(
           Padding(
@@ -492,6 +595,49 @@ class _SearchPageState extends State<SearchPage> {
               playlistId: playlist['ytid'],
               playlistArtwork: playlist['image'],
               cubeIcon: FluentIcons.apps_list_24_filled,
+              borderRadius: borderRadius,
+            ),
+          ),
+        );
+      }
+    }
+
+    // Radio Stations section
+    if (_radioStationsSearchResult.isNotEmpty) {
+      widgets.add(
+        SectionTitle(
+          'Radio Stations',
+          primaryColor,
+          icon: FluentIcons.speaker_2_24_filled,
+        ),
+      );
+
+      final stationsCount = _radioStationsSearchResult.length > maxSongsInList
+          ? maxSongsInList
+          : _radioStationsSearchResult.length;
+
+      for (var index = 0; index < stationsCount; index++) {
+        final station = _radioStationsSearchResult[index];
+        final isLast = index == stationsCount - 1;
+
+        widgets.add(
+          Padding(
+            padding: isLast ? commonListViewBottomPadding : EdgeInsets.zero,
+            child: RadioStationCard(
+              key: listItemKey('search_radio_station', index, station),
+              station: station,
+              onPressed: () async {
+                final success = await audioHandler.playRadioStream(
+                  id: station.id,
+                  name: station.name,
+                  streamUrl: station.streamUrl,
+                  image: station.image,
+                  genre: station.genre,
+                );
+                if (!success && context.mounted) {
+                  showToast(context, 'Failed to play radio station');
+                }
+              },
             ),
           ),
         );
@@ -500,7 +646,7 @@ class _SearchPageState extends State<SearchPage> {
 
     return Column(
       key: ValueKey(
-        'results-${_songsSearchResult.length}-${_albumsSearchResult.length}-${_playlistsSearchResult.length}',
+        'results-${_songsSearchResult.length}-${_artistsSearchResult.length}-${_albumsSearchResult.length}-${_playlistsSearchResult.length}',
       ),
       children: widgets,
     );

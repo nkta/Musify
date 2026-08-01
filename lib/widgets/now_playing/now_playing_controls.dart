@@ -19,11 +19,15 @@
  *     please visit: https://github.com/gokadzev/Musify
  */
 
+import 'dart:async';
+
 import 'package:audio_service/audio_service.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:musify/extensions/l10n.dart';
 import 'package:musify/main.dart';
+import 'package:musify/services/router_service.dart';
 import 'package:musify/services/settings_manager.dart';
 import 'package:musify/utilities/app_utils.dart';
 import 'package:musify/widgets/now_playing/marquee_text_widget.dart';
@@ -53,6 +57,7 @@ class NowPlayingControls extends StatelessWidget {
 
     final titleFontSize = getResponsiveTitleFontSize(size);
     final artistFontSize = getResponsiveArtistFontSize(size);
+    final canOpenArtist = _canOpenArtist(metadata);
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -93,11 +98,17 @@ class NowPlayingControls extends StatelessWidget {
                   ),
                   SizedBox(height: spacing),
                   if (metadata.artist != null)
-                    MarqueeTextWidget(
-                      text: metadata.artist!,
-                      fontColor: colorScheme.onSurfaceVariant,
-                      fontSize: artistFontSize * fontScale,
-                      fontWeight: FontWeight.w500,
+                    GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: canOpenArtist
+                          ? () => _openArtistPage(context, metadata)
+                          : null,
+                      child: MarqueeTextWidget(
+                        text: metadata.artist!,
+                        fontColor: colorScheme.onSurfaceVariant,
+                        fontSize: artistFontSize * fontScale,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                 ],
               ),
@@ -120,6 +131,69 @@ class NowPlayingControls extends StatelessWidget {
         );
       },
     );
+  }
+
+  bool _canOpenArtist(MediaItem metadata) {
+    final info = _extractArtistInfo(metadata);
+    return !offlineMode.value &&
+        (info.artist.isNotEmpty ||
+            info.artistId.isNotEmpty ||
+            info.sourceSongId.isNotEmpty);
+  }
+
+  void _openArtistPage(BuildContext context, MediaItem metadata) {
+    final info = _extractArtistInfo(metadata);
+    final lookup = info.artistId.isNotEmpty
+        ? info.artistId
+        : info.artist.isNotEmpty
+        ? info.artist
+        : info.sourceSongId;
+
+    if (lookup.isEmpty) return;
+
+    final router = GoRouter.of(context);
+    final basePath = _artistRouteBasePath(context);
+    final artistData = {
+      'ytid': info.artistId.isNotEmpty ? info.artistId : lookup,
+      if (info.artist.isNotEmpty) 'title': info.artist,
+      if (info.sourceSongId.isNotEmpty) 'sourceSongId': info.sourceSongId,
+      if (info.videoAuthor.isNotEmpty) 'videoAuthor': info.videoAuthor,
+      'source': 'youtube-artist',
+      'isArtist': true,
+      'list': [],
+    };
+
+    Navigator.of(context).pop();
+    unawaited(
+      router.push(
+        '$basePath/artist/${Uri.encodeComponent(lookup)}',
+        extra: artistData,
+      ),
+    );
+  }
+
+  ({String artist, String artistId, String sourceSongId, String videoAuthor})
+  _extractArtistInfo(MediaItem metadata) {
+    return (
+      artist: metadata.artist?.trim() ?? '',
+      artistId: metadata.extras?['artistId']?.toString().trim() ?? '',
+      sourceSongId: metadata.extras?['ytid']?.toString().trim() ?? '',
+      videoAuthor: metadata.extras?['videoAuthor']?.toString().trim() ?? '',
+    );
+  }
+
+  String _artistRouteBasePath(BuildContext context) {
+    try {
+      final currentPath = GoRouterState.of(context).uri.path;
+      if (currentPath.startsWith(NavigationManager.searchPath)) {
+        return NavigationManager.searchPath;
+      }
+      if (currentPath.startsWith(NavigationManager.libraryPath)) {
+        return NavigationManager.libraryPath;
+      }
+    } catch (_) {}
+
+    return NavigationManager.homePath;
   }
 }
 
@@ -215,93 +289,14 @@ class PlayerControlButtons extends StatelessWidget {
               SizedBox(width: buttonSpacing),
               Expanded(
                 child: Center(
-                  child: StreamBuilder<List<MediaItem>>(
-                    stream: audioHandler.queue,
-                    builder: (context, snapshot) {
-                      return ValueListenableBuilder<AudioServiceRepeatMode>(
-                        valueListenable: repeatNotifier,
-                        builder: (_, repeatMode, __) {
-                          return FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  icon: Icon(
-                                    FluentIcons.previous_24_regular,
-                                    color: audioHandler.hasPrevious
-                                        ? colorScheme.onSurface
-                                        : colorScheme.onSurface.withValues(
-                                            alpha: 0.3,
-                                          ),
-                                  ),
-                                  tooltip: context.l10n!.skipToPrevious,
-                                  constraints: buttonConstraints,
-                                  iconSize: controlIconSize * 0.65,
-                                  onPressed: audioHandler.hasPrevious
-                                      ? () => audioHandler.skipToPrevious()
-                                      : null,
-                                  style: IconButton.styleFrom(
-                                    backgroundColor:
-                                        colorScheme.surfaceContainerHighest,
-                                    disabledBackgroundColor:
-                                        colorScheme.surfaceContainerHighest,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(16),
-                                    ),
-                                    padding: buttonPadding,
-                                    minimumSize: Size(
-                                      minButtonSize,
-                                      minButtonSize,
-                                    ),
-                                  ),
-                                ),
-                                SizedBox(width: buttonSpacing),
-                                PlaybackIconButton(
-                                  iconColor: colorScheme.onPrimary,
-                                  backgroundColor: colorScheme.primary,
-                                  iconSize: controlIconSize,
-                                  padding: playPadding,
-                                ),
-                                SizedBox(width: buttonSpacing),
-                                IconButton(
-                                  icon: Icon(
-                                    FluentIcons.next_24_regular,
-                                    color: audioHandler.hasNext
-                                        ? colorScheme.onSurface
-                                        : colorScheme.onSurface.withValues(
-                                            alpha: 0.3,
-                                          ),
-                                  ),
-                                  tooltip: context.l10n!.skipToNext,
-                                  constraints: buttonConstraints,
-                                  iconSize: controlIconSize * 0.65,
-                                  onPressed: () =>
-                                      repeatNotifier.value ==
-                                          AudioServiceRepeatMode.one
-                                      ? audioHandler.playAgain()
-                                      : audioHandler.skipToNext(),
-                                  style: IconButton.styleFrom(
-                                    backgroundColor:
-                                        colorScheme.surfaceContainerHighest,
-                                    disabledBackgroundColor:
-                                        colorScheme.surfaceContainerHighest,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(16),
-                                    ),
-                                    padding: buttonPadding,
-                                    minimumSize: Size(
-                                      minButtonSize,
-                                      minButtonSize,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          );
-                        },
-                      );
-                    },
+                  child: _PlaybackControlsRow(
+                    colorScheme: colorScheme,
+                    buttonConstraints: buttonConstraints,
+                    buttonPadding: buttonPadding,
+                    controlIconSize: controlIconSize,
+                    buttonSpacing: buttonSpacing,
+                    minButtonSize: minButtonSize,
+                    playPadding: playPadding,
                   ),
                 ),
               ),
@@ -418,6 +413,131 @@ class PlayerControlButtons extends StatelessWidget {
           },
         );
       },
+    );
+  }
+}
+
+class _PlaybackControlsRow extends StatelessWidget {
+  const _PlaybackControlsRow({
+    required this.colorScheme,
+    required this.buttonConstraints,
+    required this.buttonPadding,
+    required this.controlIconSize,
+    required this.buttonSpacing,
+    required this.minButtonSize,
+    required this.playPadding,
+  });
+
+  final ColorScheme colorScheme;
+  final BoxConstraints buttonConstraints;
+  final EdgeInsets buttonPadding;
+  final double controlIconSize;
+  final double buttonSpacing;
+  final double minButtonSize;
+  final EdgeInsets playPadding;
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<MediaItem>>(
+      stream: audioHandler.queue,
+      builder: (context, snapshot) {
+        return ValueListenableBuilder<AudioServiceRepeatMode>(
+          valueListenable: repeatNotifier,
+          builder: (_, repeatMode, __) {
+            return FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _PlaybackControlButton(
+                    icon: FluentIcons.previous_24_regular,
+                    isEnabled:
+                        audioHandler.hasPrevious ||
+                        repeatMode != AudioServiceRepeatMode.none,
+                    tooltip: context.l10n!.skipToPrevious,
+                    onPressed: () => audioHandler.skipToPrevious(),
+                    colorScheme: colorScheme,
+                    buttonConstraints: buttonConstraints,
+                    buttonPadding: buttonPadding,
+                    controlIconSize: controlIconSize,
+                    minButtonSize: minButtonSize,
+                  ),
+                  SizedBox(width: buttonSpacing),
+                  PlaybackIconButton(
+                    iconColor: colorScheme.onPrimary,
+                    backgroundColor: colorScheme.primary,
+                    iconSize: controlIconSize,
+                    padding: playPadding,
+                  ),
+                  SizedBox(width: buttonSpacing),
+                  _PlaybackControlButton(
+                    icon: FluentIcons.next_24_regular,
+                    isEnabled:
+                        audioHandler.hasNext ||
+                        repeatMode == AudioServiceRepeatMode.one,
+                    tooltip: context.l10n!.skipToNext,
+                    onPressed: () => repeatMode == AudioServiceRepeatMode.one
+                        ? audioHandler.playAgain()
+                        : audioHandler.skipToNext(),
+                    colorScheme: colorScheme,
+                    buttonConstraints: buttonConstraints,
+                    buttonPadding: buttonPadding,
+                    controlIconSize: controlIconSize,
+                    minButtonSize: minButtonSize,
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+class _PlaybackControlButton extends StatelessWidget {
+  const _PlaybackControlButton({
+    required this.icon,
+    required this.isEnabled,
+    required this.tooltip,
+    required this.onPressed,
+    required this.colorScheme,
+    required this.buttonConstraints,
+    required this.buttonPadding,
+    required this.controlIconSize,
+    required this.minButtonSize,
+  });
+
+  final IconData icon;
+  final bool isEnabled;
+  final String tooltip;
+  final VoidCallback onPressed;
+  final ColorScheme colorScheme;
+  final BoxConstraints buttonConstraints;
+  final EdgeInsets buttonPadding;
+  final double controlIconSize;
+  final double minButtonSize;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      icon: Icon(
+        icon,
+        color: isEnabled
+            ? colorScheme.onSurface
+            : colorScheme.onSurface.withValues(alpha: 0.3),
+      ),
+      tooltip: tooltip,
+      constraints: buttonConstraints,
+      iconSize: controlIconSize * 0.65,
+      onPressed: isEnabled ? onPressed : null,
+      style: IconButton.styleFrom(
+        backgroundColor: colorScheme.surfaceContainerHighest,
+        disabledBackgroundColor: colorScheme.surfaceContainerHighest,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        padding: buttonPadding,
+        minimumSize: Size(minButtonSize, minButtonSize),
+      ),
     );
   }
 }

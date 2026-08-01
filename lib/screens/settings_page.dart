@@ -20,6 +20,7 @@
  */
 
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:musify/constants/app_constants.dart';
@@ -28,7 +29,9 @@ import 'package:musify/main.dart';
 import 'package:musify/screens/search_page.dart';
 import 'package:musify/services/common_services.dart';
 import 'package:musify/services/data_manager.dart';
+import 'package:musify/services/listening_stats_service.dart';
 import 'package:musify/services/playlist_download_service.dart';
+import 'package:musify/services/playlists_manager.dart';
 import 'package:musify/services/router_service.dart';
 import 'package:musify/services/settings_manager.dart';
 import 'package:musify/services/update_manager.dart';
@@ -41,6 +44,7 @@ import 'package:musify/utilities/url_launcher.dart';
 import 'package:musify/widgets/bottom_sheet_bar.dart';
 import 'package:musify/widgets/confirmation_dialog.dart';
 import 'package:musify/widgets/custom_bar.dart';
+import 'package:musify/widgets/mini_player_bottom_space.dart';
 import 'package:musify/widgets/section_header.dart';
 
 class SettingsPage extends StatelessWidget {
@@ -67,6 +71,7 @@ class SettingsPage extends StatelessWidget {
             if (!offlineMode.value) _buildOnlineFeaturesSection(context),
             _buildOthersSection(context),
             const SizedBox(height: 20),
+            const MiniPlayerBottomSpace(),
           ],
         ),
       ),
@@ -79,6 +84,8 @@ class SettingsPage extends StatelessWidget {
     Color activatedColor,
     Color inactivatedColor,
   ) {
+    final isOffline = offlineMode.value;
+
     return Column(
       children: [
         SectionHeader(
@@ -152,7 +159,7 @@ class SettingsPage extends StatelessWidget {
                 value: value,
                 onChanged: (value) {
                   useProxy.value = value;
-                  addOrUpdateData('settings', 'useProxy', value);
+                  addOrUpdateData<bool>('settings', 'useProxy', value);
                   showToast(context, context.l10n!.settingChangedMsg);
                 },
               ),
@@ -178,12 +185,29 @@ class SettingsPage extends StatelessWidget {
           },
         ),
         ValueListenableBuilder<bool>(
+          valueListenable: wrappedEnabled,
+          builder: (_, value, __) {
+            return CustomBar(
+              context.l10n!.listeningStats,
+              FluentIcons.clock_24_regular,
+              description: context.l10n!.listeningStatsDescription,
+              trailing: Switch(
+                value: value,
+                onChanged: (value) => _toggleWrapped(context, value),
+              ),
+            );
+          },
+        ),
+        ValueListenableBuilder<bool>(
           valueListenable: offlineMode,
           builder: (_, value, __) {
             return CustomBar(
               context.l10n!.offlineMode,
               FluentIcons.cloud_off_24_regular,
               description: context.l10n!.offlineModeDescription,
+              borderRadius: isOffline && isFdroidBuild
+                  ? commonCustomBarRadiusLast
+                  : BorderRadius.zero,
               trailing: Switch(
                 value: value,
                 onChanged: (value) => _toggleOfflineMode(context, value),
@@ -199,7 +223,9 @@ class SettingsPage extends StatelessWidget {
                 context.l10n!.automaticUpdateChecks,
                 FluentIcons.arrow_sync_24_regular,
                 description: context.l10n!.automaticUpdateChecksDescription,
-                borderRadius: commonCustomBarRadiusLast,
+                borderRadius: offlineMode.value
+                    ? commonCustomBarRadiusLast
+                    : BorderRadius.zero,
                 trailing: Switch(
                   value: value ?? false,
                   onChanged: (value) =>
@@ -239,7 +265,7 @@ class SettingsPage extends StatelessWidget {
               trailing: Switch(
                 value: value,
                 onChanged: (value) {
-                  audioHandler.changeAutoPlayNextStatus();
+                  _toggleAutoPlayNext(context, value);
                   showToast(context, context.l10n!.settingChangedMsg);
                 },
               ),
@@ -308,9 +334,27 @@ class SettingsPage extends StatelessWidget {
             context: context,
             confirmationMessage: context.l10n!.clearRecentlyPlayedQuestion,
             onSubmit: () {
-              userRecentlyPlayed = [];
+              userRecentlyPlayed.value = [];
               deleteData('user', 'recentlyPlayedSongs');
               showToast(context, '${context.l10n!.recentlyPlayedMsg}!');
+            },
+          ),
+        ),
+        CustomBar(
+          context.l10n!.clearListeningStats,
+          FluentIcons.clock_24_regular,
+          onTap: () => _showConfirmationDialog(
+            context: context,
+            confirmationMessage: context.l10n!.clearListeningStatsQuestion,
+            submitMessage: context.l10n!.delete,
+            isDangerous: true,
+            onSubmit: () async {
+              audioHandler.resetListeningStatsSession(flushStats: false);
+              await listeningStatsService.clearStats();
+              audioHandler.startListeningStatsSessionIfNeeded();
+              if (context.mounted) {
+                showToast(context, '${context.l10n!.listeningStatsCleared}!');
+              }
             },
           ),
         ),
@@ -347,6 +391,24 @@ class SettingsPage extends StatelessWidget {
           onTap: () async {
             try {
               final result = await restoreData(context);
+              if (result.success) {
+                reloadSongLibraryStateFromStorage();
+                reloadPlaylistLibraryStateFromStorage();
+                reloadSearchHistoryFromStorage();
+                // The restored settings box may carry a different
+                // wrappedEnabled value than the one already loaded into this
+                // ValueNotifier; without resyncing it here, recording silently
+                // keeps following the pre-restore value until the next cold
+                // start, when it would suddenly flip without explanation.
+                wrappedEnabled.value =
+                    await getData(
+                          'settings',
+                          'wrappedEnabled',
+                          defaultValue: true,
+                        )
+                        as bool;
+                listeningStatsService.reload();
+              }
               if (context.mounted) {
                 showToast(
                   context,
@@ -388,75 +450,69 @@ class SettingsPage extends StatelessWidget {
           title: context.l10n!.becomeSponsor,
           icon: FluentIcons.heart_24_filled,
         ),
-        Padding(
-          padding: commonBarPadding,
-          child: Card(
-            margin: const EdgeInsets.only(bottom: 3),
-            elevation: 0,
-            shape: RoundedRectangleBorder(
+        Card(
+          margin: const EdgeInsets.only(bottom: 3),
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(15),
+          ),
+          child: DecoratedBox(
+            decoration: BoxDecoration(borderRadius: BorderRadius.circular(15)),
+            child: Material(
+              color: colorScheme.primaryContainer,
               borderRadius: BorderRadius.circular(15),
-            ),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
+              child: InkWell(
                 borderRadius: BorderRadius.circular(15),
-              ),
-              child: Material(
-                color: colorScheme.primaryContainer,
-                borderRadius: BorderRadius.circular(15),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(15),
-                  onTap: () =>
-                      launchURL(Uri.parse('https://ko-fi.com/gokadzev')),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      vertical: 12,
-                      horizontal: 16,
-                    ),
-                    child: SizedBox(
-                      height: 45,
-                      child: Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: colorScheme.onPrimaryContainer.withValues(
-                                alpha: 0.15,
-                              ),
-                              borderRadius: BorderRadius.circular(12),
+                onTap: () => launchURL(Uri.parse('https://ko-fi.com/gokadzev')),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 12,
+                    horizontal: 16,
+                  ),
+                  child: SizedBox(
+                    height: 45,
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: colorScheme.onPrimaryContainer.withValues(
+                              alpha: 0.15,
                             ),
-                            child: Icon(
-                              FluentIcons.heart_24_regular,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Icon(
+                            FluentIcons.heart_24_regular,
+                            color: colorScheme.onPrimaryContainer,
+                            size: 24,
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Text(
+                            context.l10n!.sponsorProject,
+                            style: TextStyle(
                               color: colorScheme.onPrimaryContainer,
-                              size: 24,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: Text(
-                              context.l10n!.sponsorProject,
-                              style: TextStyle(
-                                color: colorScheme.onPrimaryContainer,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                              ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: colorScheme.onPrimaryContainer.withValues(
+                              alpha: 0.1,
                             ),
+                            borderRadius: BorderRadius.circular(8),
                           ),
-                          Container(
-                            padding: const EdgeInsets.all(6),
-                            decoration: BoxDecoration(
-                              color: colorScheme.onPrimaryContainer.withValues(
-                                alpha: 0.1,
-                              ),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Icon(
-                              FluentIcons.arrow_right_24_regular,
-                              color: colorScheme.onPrimaryContainer,
-                              size: 16,
-                            ),
+                          child: Icon(
+                            FluentIcons.arrow_right_24_regular,
+                            color: colorScheme.onPrimaryContainer,
+                            size: 16,
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -525,7 +581,11 @@ class SettingsPage extends StatelessWidget {
 
             return GestureDetector(
               onTap: () {
-                addOrUpdateData('settings', 'accentColor', color.toARGB32());
+                addOrUpdateData<int>(
+                  'settings',
+                  'accentColor',
+                  color.toARGB32(),
+                );
                 Musify.updateAppState(
                   context,
                   newAccentColor: color,
@@ -586,7 +646,7 @@ class SettingsPage extends StatelessWidget {
           return BottomSheetBar(
             modeNames[mode.index],
             () {
-              addOrUpdateData('settings', 'themeIndex', mode.index);
+              addOrUpdateData<int>('settings', 'themeIndex', mode.index);
               Musify.updateAppState(context, newThemeMode: mode);
               Navigator.pop(context);
             },
@@ -623,7 +683,11 @@ class SettingsPage extends StatelessWidget {
           return BottomSheetBar(
             getLanguageDisplayName(context, language),
             () {
-              addOrUpdateData('settings', 'languageCode', newLocaleFullCode);
+              addOrUpdateData<String>(
+                'settings',
+                'languageCode',
+                newLocaleFullCode,
+              );
               Musify.updateAppState(context, newLocale: newLocale);
               showToast(context, context.l10n!.languageMsg);
               Navigator.pop(context);
@@ -661,7 +725,7 @@ class SettingsPage extends StatelessWidget {
           return BottomSheetBar(
             qualityNames[index],
             () {
-              addOrUpdateData('settings', 'audioQuality', quality);
+              addOrUpdateData<String>('settings', 'audioQuality', quality);
               audioQualitySetting.value = quality;
               showToast(context, context.l10n!.audioQualityMsg);
               Navigator.pop(context);
@@ -675,7 +739,7 @@ class SettingsPage extends StatelessWidget {
   }
 
   void _toggleSystemColor(BuildContext context, bool value) {
-    addOrUpdateData('settings', 'useSystemColor', value);
+    addOrUpdateData<bool>('settings', 'useSystemColor', value);
     useSystemColor.value = value;
     Musify.updateAppState(
       context,
@@ -686,14 +750,14 @@ class SettingsPage extends StatelessWidget {
   }
 
   void _togglePureBlack(BuildContext context, bool value) {
-    addOrUpdateData('settings', 'usePureBlackColor', value);
+    addOrUpdateData<bool>('settings', 'usePureBlackColor', value);
     usePureBlackColor.value = value;
     Musify.updateAppState(context);
     showToast(context, context.l10n!.settingChangedMsg);
   }
 
   void _togglePredictiveBack(BuildContext context, bool value) {
-    addOrUpdateData('settings', 'predictiveBack', value);
+    addOrUpdateData<bool>('settings', 'predictiveBack', value);
     predictiveBack.value = value;
     transitionsBuilder = value
         ? const PredictiveBackPageTransitionsBuilder()
@@ -702,8 +766,28 @@ class SettingsPage extends StatelessWidget {
     showToast(context, context.l10n!.settingChangedMsg);
   }
 
+  Future<void> _toggleWrapped(BuildContext context, bool value) async {
+    if (!value) {
+      audioHandler.resetListeningStatsSession(
+        countCurrentTick: true,
+        flushStats: false,
+      );
+      await listeningStatsService.flush();
+    }
+
+    await addOrUpdateData<bool>('settings', 'wrappedEnabled', value);
+    wrappedEnabled.value = value;
+    listeningStatsService.reload();
+    if (value) {
+      audioHandler.startListeningStatsSessionIfNeeded();
+    }
+    if (context.mounted) {
+      showToast(context, context.l10n!.settingChangedMsg);
+    }
+  }
+
   void _toggleOfflineMode(BuildContext context, bool value) {
-    addOrUpdateData('settings', 'offlineMode', value);
+    addOrUpdateData<bool>('settings', 'offlineMode', value);
     offlineMode.value = value;
 
     // Trigger router refresh and notify about the change
@@ -713,19 +797,25 @@ class SettingsPage extends StatelessWidget {
   }
 
   void _toggleSponsorBlock(BuildContext context, bool value) {
-    addOrUpdateData('settings', 'sponsorBlockSupport', value);
+    addOrUpdateData<bool>('settings', 'sponsorBlockSupport', value);
     sponsorBlockSupport.value = value;
     showToast(context, context.l10n!.settingChangedMsg);
   }
 
+  void _toggleAutoPlayNext(BuildContext context, bool value) {
+    addOrUpdateData<bool>('settings', 'playNextSongAutomatically', value);
+    playNextSongAutomatically.value = value;
+    showToast(context, context.l10n!.settingChangedMsg);
+  }
+
   void _toggleAutomaticUpdateChecks(BuildContext context, bool value) {
-    addOrUpdateData('settings', 'shouldWeCheckUpdates', value);
+    addOrUpdateData<bool>('settings', 'shouldWeCheckUpdates', value);
     shouldWeCheckUpdates.value = value;
     showToast(context, context.l10n!.settingChangedMsg);
   }
 
   void _toggleExternalRecommendations(BuildContext context, bool value) {
-    addOrUpdateData('settings', 'externalRecommendations', value);
+    addOrUpdateData<bool>('settings', 'externalRecommendations', value);
     externalRecommendations.value = value;
     showToast(context, context.l10n!.settingChangedMsg);
   }

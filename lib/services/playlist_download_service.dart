@@ -70,6 +70,43 @@ class OfflinePlaylistService {
     return activeDownloads.contains(playlistId);
   }
 
+  /// Checks whether [playlist] now has 100% of its songs downloaded offline
+  /// and, if so, marks it offline too.
+  ///
+  /// Unlike the batch scan in [_handleDownloadCompletion] (which only runs
+  /// right after a playlist finishes downloading), this is meant to be
+  /// called any time a single playlist's song list or like-status changes —
+  /// e.g. after adding a song to a custom playlist, or liking a playlist —
+  /// so playlists created/modified *after* the triggering download aren't
+  /// silently skipped.
+  void checkAndAutoMarkOffline(Map playlist) {
+    final id = playlist['ytid']?.toString();
+    final pList = playlist['list'] as List?;
+    if (id == null || pList == null || pList.isEmpty) return;
+    if (isPlaylistDownloaded(id)) return;
+
+    final offlineSongIds = userOfflineSongs.value
+        .map((s) => s['ytid'])
+        .toSet();
+    if (!pList.every((s) => offlineSongIds.contains(s['ytid']))) return;
+
+    offlinePlaylists.value = [
+      ...offlinePlaylists.value,
+      {
+        ...playlist,
+        'list': pList,
+        'downloadedAt': DateTime.now().millisecondsSinceEpoch,
+      },
+    ];
+    unawaited(
+      addOrUpdateData<List>(
+        'userNoBackup',
+        'offlinePlaylists',
+        offlinePlaylists.value,
+      ),
+    );
+  }
+
   Future<void> downloadPlaylist(BuildContext context, Map playlist) async {
     final playlistId = playlist['ytid'] as String? ?? playlist['title'];
 
@@ -154,6 +191,7 @@ class OfflinePlaylistService {
           progressNotifier.value.completed > progressNotifier.value.failed) {
         // Create an offline version of the playlist
         final offlinePlaylist = {
+          ...playlist,
           'ytid': playlistId,
           'title': playlist['title'],
           'image': playlist['image'],
@@ -175,9 +213,44 @@ class OfflinePlaylistService {
           updatedPlaylists.add(offlinePlaylist);
         }
 
+        // Also mark albums/playlists whose songs are now fully offline
+        final offlineSongIds = userOfflineSongs.value
+            .map((s) => s['ytid'])
+            .toSet();
+
+        final seenIds = <String>{};
+        final userPlaylistSources = <Map>[
+          ...userCustomPlaylists.value,
+          ...userLikedPlaylists.value,
+          for (final folder in userPlaylistFolders.value)
+            ...List<Map>.from(folder['playlists'] ?? []),
+          ...playlists,
+        ].where((p) {
+          final id = p['ytid']?.toString();
+          return id != null && seenIds.add(id);
+        }).toList();
+        for (final p in userPlaylistSources) {
+          final pList = p['list'] as List?;
+          if (pList == null ||
+              pList.isEmpty ||
+              p['ytid'] == playlistId ||
+              isPlaylistDownloaded(
+                p['ytid']?.toString() ?? '',
+              )) {
+            continue;
+          }
+          if (pList.every((s) => offlineSongIds.contains(s['ytid']))) {
+            updatedPlaylists.add({
+              ...p,
+              'list': pList,
+              'downloadedAt': DateTime.now().millisecondsSinceEpoch,
+            });
+          }
+        }
+
         offlinePlaylists.value = updatedPlaylists;
         unawaited(
-          addOrUpdateData(
+          addOrUpdateData<List>(
             'userNoBackup',
             'offlinePlaylists',
             offlinePlaylists.value,
@@ -290,15 +363,15 @@ class OfflinePlaylistService {
               });
 
           // Also check if song is in user's liked songs or OTHER custom playlists
-          final isInLikedSongs = userLikedSongsList.any(
+          final isInLikedSongs = userLikedSongsList.value.any(
             (s) => s['ytid'] == songId,
           );
           final isInOtherCustomPlaylists = getUserCustomPlaylists()
               .where((p) => p['ytid']?.toString() != normalizedPlaylistId)
               .any((p) {
-            final customPlaylistSongs = p['list'] as List<dynamic>? ?? [];
-            return customPlaylistSongs.any((s) => s['ytid'] == songId);
-          });
+                final customPlaylistSongs = p['list'] as List<dynamic>? ?? [];
+                return customPlaylistSongs.any((s) => s['ytid'] == songId);
+              });
 
           // Only remove if not used elsewhere
           if (!isUsedInOtherPlaylists &&
@@ -322,7 +395,7 @@ class OfflinePlaylistService {
         );
       offlinePlaylists.value = updatedPlaylists;
       unawaited(
-        addOrUpdateData(
+        addOrUpdateData<List>(
           'userNoBackup',
           'offlinePlaylists',
           offlinePlaylists.value,
@@ -374,8 +447,7 @@ class OfflinePlaylistService {
 
       await FilePaths.ensureDirectoriesExist();
 
-      userOfflineSongs.clear();
-      currentOfflineSongsLength.value = 0;
+      userOfflineSongs.value = [];
 
       offlinePlaylists.value = [];
 
@@ -385,8 +457,8 @@ class OfflinePlaylistService {
       downloadProgressNotifiers.clear();
       activeDownloads.clear();
 
-      unawaited(addOrUpdateData('userNoBackup', 'offlineSongs', []));
-      unawaited(addOrUpdateData('userNoBackup', 'offlinePlaylists', []));
+      unawaited(addOrUpdateData<List>('userNoBackup', 'offlineSongs', []));
+      unawaited(addOrUpdateData<List>('userNoBackup', 'offlinePlaylists', []));
 
       logger.log('All downloads deleted successfully');
     } catch (e, stackTrace) {
@@ -412,20 +484,6 @@ class OfflinePlaylistService {
         stackTrace: stackTrace,
       );
     }
-  }
-
-  Map<String, dynamic> getDownloadStatus(String playlistId) {
-    final isDownloaded = isPlaylistDownloaded(playlistId);
-    final isDownloading = isPlaylistDownloading(playlistId);
-    final progress = downloadProgressNotifiers.containsKey(playlistId)
-        ? downloadProgressNotifiers[playlistId]!.value
-        : null;
-
-    return {
-      'isDownloaded': isDownloaded,
-      'isDownloading': isDownloading,
-      'progress': progress,
-    };
   }
 
   Future<void> _processDownloadQueue(
@@ -496,13 +554,6 @@ class DownloadProgress {
     if (total <= 0) return 0;
     final totalProcessed = completed + failed;
     return totalProcessed > total ? 1.0 : totalProcessed / total;
-  }
-
-  bool get isComplete => completed + failed >= total;
-
-  double get successRate {
-    final totalProcessed = completed + failed;
-    return totalProcessed > 0 ? completed / totalProcessed : 0.0;
   }
 
   @override

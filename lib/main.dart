@@ -35,6 +35,7 @@ import 'package:musify/localization/app_localizations.dart';
 import 'package:musify/services/audio_service.dart';
 import 'package:musify/services/data_manager.dart';
 import 'package:musify/services/io_service.dart';
+import 'package:musify/services/listening_stats_service.dart';
 import 'package:musify/services/logger_service.dart';
 import 'package:musify/services/playlist_sharing.dart';
 import 'package:musify/services/playlists_manager.dart';
@@ -80,7 +81,7 @@ class Musify extends StatefulWidget {
   _MusifyState createState() => _MusifyState();
 }
 
-class _MusifyState extends State<Musify> {
+class _MusifyState extends State<Musify> with WidgetsBindingObserver {
   void changeSettings({
     ThemeMode? newThemeMode,
     Locale? newLocale,
@@ -99,7 +100,11 @@ class _MusifyState extends State<Musify> {
         if (systemColorStatus != null &&
             useSystemColor.value != systemColorStatus) {
           useSystemColor.value = systemColorStatus;
-          addOrUpdateData('settings', 'useSystemColor', systemColorStatus);
+          addOrUpdateData<bool>(
+            'settings',
+            'useSystemColor',
+            systemColorStatus,
+          );
         }
         primaryColorSetting = newAccentColor;
       }
@@ -109,6 +114,8 @@ class _MusifyState extends State<Musify> {
   @override
   void initState() {
     super.initState();
+
+    WidgetsBinding.instance.addObserver(this);
 
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
@@ -187,7 +194,25 @@ class _MusifyState extends State<Musify> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    // Persist listening stats when the app leaves the foreground. This is the
+    // reliable moment to snapshot and flush: unlike widget dispose, these
+    // callbacks are delivered before the OS suspends or terminates the process.
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached) {
+      listeningStatsService.recordListeningSessionProgress(
+        wasPlaying: audioHandler.audioPlayer.playing,
+      );
+      unawaited(listeningStatsService.flush());
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     offlineMode.removeListener(_onOfflineModeChanged);
 
     Hive.close();
@@ -306,76 +331,70 @@ Future<void> initialisation() async {
 
   applicationDirPath = (await getApplicationDocumentsDirectory()).path;
   await FilePaths.ensureDirectoriesExist();
+
+  // TODO: Remove after a few versions, this is just for legacy support
+  unawaited(listeningStatsService.purgeLegacyRadioStreamStats());
 }
 
 void handleIncomingLink(Uri? uri) async {
-  if (uri != null && uri.scheme == 'musify' && uri.host == 'playlist') {
-    try {
-      if (uri.pathSegments[0] == 'custom') {
-        final encodedPlaylist = uri.pathSegments[1];
+  if (uri == null || uri.scheme != 'musify' || uri.host != 'playlist') return;
 
-        final playlist = await PlaylistSharingService.decodeAndExpandPlaylist(
-          encodedPlaylist,
-        );
+  if (uri.pathSegments.length < 2 || uri.pathSegments[0] != 'custom') return;
 
-        if (playlist != null) {
-          // Ensure the incoming playlist has a unique id so it can be removed later
-          if (playlist['ytid'] == null || playlist['ytid'].toString().isEmpty) {
-            playlist['ytid'] = PlaylistUtils.generateCustomPlaylistId();
-          }
-          // Check for duplicate by title and song ytids
-          final incomingYtids = (playlist['list'] as List<dynamic>)
-              .map((s) => s['ytid'].toString())
-              .toList();
+  try {
+    final encodedPlaylist = uri.pathSegments[1];
+    final playlist = await PlaylistSharingService.decodeAndExpandPlaylist(
+      encodedPlaylist,
+    );
 
-          final exists = userCustomPlaylists.value.any((p) {
-            if (p['title'] != playlist['title']) return false;
-            final existingList = (p['list'] as List<dynamic>?) ?? [];
-            final existingYtids = existingList
-                .map((s) => s['ytid']?.toString())
-                .where((e) => e != null)
-                .toList();
-            if (existingYtids.length != incomingYtids.length) return false;
-            for (var i = 0; i < incomingYtids.length; i++) {
-              if (existingYtids[i] != incomingYtids[i]) return false;
-            }
-            return true;
-          });
+    if (playlist == null) {
+      _showPlaylistError();
+      return;
+    }
 
-          if (exists) {
-            showToast(
-              NavigationManager().context,
-              NavigationManager().context.l10n!.playlistAlreadyExists,
-            );
-          } else {
-            userCustomPlaylists.value = [
-              ...userCustomPlaylists.value,
-              playlist,
-            ];
-            unawaited(
-              addOrUpdateData(
-                'user',
-                'customPlaylists',
-                userCustomPlaylists.value,
-              ),
-            );
-            showToast(
-              NavigationManager().context,
-              '${NavigationManager().context.l10n!.addedSuccess}!',
-            );
-          }
-        } else {
-          showToast(
-            NavigationManager().context,
-            NavigationManager().context.l10n!.failedToLoadPlaylist,
-          );
-        }
-      }
-    } catch (e) {
+    // Ensure the incoming playlist has a unique id so it can be removed later
+    if (playlist['ytid'] == null || playlist['ytid'].toString().isEmpty) {
+      playlist['ytid'] = PlaylistUtils.generateCustomPlaylistId();
+    }
+
+    // Check for duplicate by title and song ytids
+    final incomingYtids = (playlist['list'] as List<dynamic>)
+        .map((s) => s['ytid'].toString())
+        .toList();
+
+    final isDuplicate = PlaylistUtils.playlistExists(
+      playlist,
+      incomingYtids,
+      userCustomPlaylists.value,
+    );
+
+    if (isDuplicate) {
       showToast(
         NavigationManager().context,
-        NavigationManager().context.l10n!.failedToLoadPlaylist,
+        NavigationManager().context.l10n!.playlistAlreadyExists,
+      );
+    } else {
+      userCustomPlaylists.value = [...userCustomPlaylists.value, playlist];
+      unawaited(
+        addOrUpdateData<List>(
+          'user',
+          'customPlaylists',
+          userCustomPlaylists.value,
+        ),
+      );
+      showToast(
+        NavigationManager().context,
+        '${NavigationManager().context.l10n!.addedSuccess}!',
       );
     }
+  } catch (e) {
+    _showPlaylistError();
   }
+}
+
+void _showPlaylistError() {
+  showToast(
+    NavigationManager().context,
+    NavigationManager().context.l10n!.failedToLoadPlaylist,
+  );
 }

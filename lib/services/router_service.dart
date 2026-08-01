@@ -24,15 +24,19 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:musify/constants/version.dart';
 import 'package:musify/screens/about_page.dart';
+import 'package:musify/screens/artist_page.dart';
 import 'package:musify/screens/bottom_navigation_page.dart';
 import 'package:musify/screens/equalizer_page.dart';
 import 'package:musify/screens/home_page.dart';
 import 'package:musify/screens/library_page.dart';
 import 'package:musify/screens/playlist_folder_page.dart';
 import 'package:musify/screens/playlist_page.dart';
+import 'package:musify/screens/radio_stations_page.dart';
 import 'package:musify/screens/search_page.dart';
 import 'package:musify/screens/settings_page.dart';
+import 'package:musify/screens/time_machine_page.dart';
 import 'package:musify/screens/user_songs_page.dart';
+import 'package:musify/services/playlist_download_service.dart';
 import 'package:musify/services/settings_manager.dart';
 import 'package:musify/widgets/offline_search_placeholder.dart';
 
@@ -71,9 +75,19 @@ class NavigationManager {
         final isOffline = offlineMode.value;
         final currentPath = state.matchedLocation;
 
-        if (isOffline && currentPath == searchPath) {
-          // Redirect search to home in offline mode
+        if (isOffline &&
+            (currentPath == searchPath || currentPath == timeMachinePath)) {
+          // Redirect unavailable pages to home in offline mode
           return homePath;
+        }
+
+        if (isOffline && currentPath.contains('/artist/')) {
+          final artistId = _decodePathParameter(
+            state.pathParameters['artistId'],
+          );
+          if (!offlinePlaylistService.isPlaylistDownloaded(artistId)) {
+            return homePath;
+          }
         }
 
         return null; // No redirect needed
@@ -114,6 +128,7 @@ class NavigationManager {
       router.routeInformationParser;
 
   static const String homePath = '/home';
+  static const String timeMachinePath = '$homePath/timeMachine';
   static const String settingsPath = '/settings';
   static const String searchPath = '/search';
   static const String libraryPath = '/library';
@@ -148,6 +163,11 @@ class NavigationManager {
             },
             routes: [
               GoRoute(
+                path: 'timeMachine',
+                pageBuilder: (context, state) =>
+                    _pushPage(child: const TimeMachinePage(), state: state),
+              ),
+              GoRoute(
                 path: 'library',
                 pageBuilder: (context, state) =>
                     _pushPage(child: const LibraryPage(), state: state),
@@ -157,6 +177,18 @@ class NavigationManager {
                 pageBuilder: (context, state) => _pushPage(
                   child: PlaylistPage(
                     playlistId: state.pathParameters['playlistId'],
+                  ),
+                  state: state,
+                ),
+              ),
+              GoRoute(
+                path: 'artist/:artistId',
+                pageBuilder: (context, state) => _pushPage(
+                  child: ArtistPage(
+                    artistId: _decodePathParameter(
+                      state.pathParameters['artistId'],
+                    ),
+                    artistData: _extraAsMap(state.extra),
                   ),
                   state: state,
                 ),
@@ -194,6 +226,20 @@ class NavigationManager {
                 state: state,
               );
             },
+            routes: [
+              GoRoute(
+                path: 'artist/:artistId',
+                pageBuilder: (context, state) => _pushPage(
+                  child: ArtistPage(
+                    artistId: _decodePathParameter(
+                      state.pathParameters['artistId'],
+                    ),
+                    artistData: _extraAsMap(state.extra),
+                  ),
+                  state: state,
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -215,6 +261,23 @@ class NavigationManager {
                   ),
                   state: state,
                 ),
+              ),
+              GoRoute(
+                path: 'artist/:artistId',
+                pageBuilder: (context, state) => _pushPage(
+                  child: ArtistPage(
+                    artistId: _decodePathParameter(
+                      state.pathParameters['artistId'],
+                    ),
+                    artistData: _extraAsMap(state.extra),
+                  ),
+                  state: state,
+                ),
+              ),
+              GoRoute(
+                path: 'radioStations',
+                pageBuilder: (context, state) =>
+                    _pushPage(child: const RadioStationsPage(), state: state),
               ),
             ],
           ),
@@ -255,6 +318,16 @@ class NavigationManager {
         ],
       ),
     ];
+  }
+
+  static String _decodePathParameter(String? value) {
+    if (value == null || value.isEmpty) return '';
+    return Uri.decodeComponent(value);
+  }
+
+  static Map? _extraAsMap(Object? extra) {
+    if (extra is Map) return Map<String, dynamic>.from(extra);
+    return null;
   }
 
   static Page<void> getPage({

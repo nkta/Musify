@@ -24,18 +24,257 @@ import 'dart:io';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:musify/constants/app_constants.dart';
+import 'package:go_router/go_router.dart';
 import 'package:musify/extensions/l10n.dart';
 import 'package:musify/main.dart';
 import 'package:musify/services/common_services.dart';
 import 'package:musify/services/playlists_manager.dart';
+import 'package:musify/services/router_service.dart';
 import 'package:musify/services/settings_manager.dart';
 import 'package:musify/utilities/flutter_toast.dart';
 import 'package:musify/utilities/formatter.dart';
 import 'package:musify/utilities/playlist_dialogs.dart';
 import 'package:musify/widgets/no_artwork_cube.dart';
+import 'package:musify/widgets/overflow_menu_button.dart';
+import 'package:musify/widgets/popup_menu_item.dart';
 import 'package:musify/widgets/rename_song_dialog.dart';
+
+List<PopupMenuEntry<String>> _buildSongMenuItems({
+  required BuildContext context,
+  required ColorScheme colorScheme,
+  required ValueListenable<bool> songLikeStatus,
+  required ValueListenable<bool> songOfflineStatus,
+  required bool showQueueActions,
+  bool isRecentSong = false,
+  bool canRename = false,
+  bool canRemove = false,
+  bool showGoToArtist = false,
+}) {
+  final l10n = context.l10n!;
+  final playNextText = l10n.playNext;
+  final addToQueueText = l10n.addToQueue;
+  final removeFromLikedSongsText = l10n.removeFromLikedSongs;
+  final addToLikedSongsText = l10n.addToLikedSongs;
+  final removeFromPlaylistText = l10n.removeFromPlaylist;
+  final addToPlaylistText = l10n.addToPlaylist;
+  final removeFromRecentlyPlayedText = l10n.removeFromRecentlyPlayed;
+  final removeOfflineText = l10n.removeOffline;
+  final makeOfflineText = l10n.makeOffline;
+  final renameSongText = l10n.renameSong;
+
+  return [
+    if (showQueueActions)
+      buildPopupMenuItem<String>(
+        value: 'play_next',
+        icon: FluentIcons.receipt_play_24_regular,
+        label: playNextText,
+        colorScheme: colorScheme,
+      ),
+    if (showGoToArtist)
+      buildPopupMenuItem<String>(
+        value: 'go_to_artist',
+        icon: FluentIcons.person_24_regular,
+        label: l10n.goToArtist,
+        colorScheme: colorScheme,
+      ),
+    if (showQueueActions)
+      buildPopupMenuItem<String>(
+        value: 'add_to_queue',
+        icon: FluentIcons.text_bullet_list_add_24_regular,
+        label: addToQueueText,
+        colorScheme: colorScheme,
+      ),
+    if (!offlineMode.value)
+      PopupMenuItem<String>(
+        value: 'like',
+        child: ValueListenableBuilder<bool>(
+          valueListenable: songLikeStatus,
+          builder: (_, value, __) {
+            return Row(
+              children: [
+                Icon(
+                  _SongBarState.likeStatusToIconMapper[value],
+                  color: colorScheme.primary,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  value ? removeFromLikedSongsText : addToLikedSongsText,
+                  style: TextStyle(color: colorScheme.onSurface),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    if (canRename)
+      buildPopupMenuItem<String>(
+        value: 'rename',
+        icon: FluentIcons.edit_24_regular,
+        label: renameSongText,
+        colorScheme: colorScheme,
+      ),
+    if (canRemove)
+      buildPopupMenuItem<String>(
+        value: 'remove',
+        icon: FluentIcons.delete_24_regular,
+        label: removeFromPlaylistText,
+        colorScheme: colorScheme,
+      ),
+    if (!offlineMode.value)
+      buildPopupMenuItem<String>(
+        value: 'add_to_playlist',
+        icon: FluentIcons.album_add_24_regular,
+        label: addToPlaylistText,
+        colorScheme: colorScheme,
+      ),
+    if (isRecentSong)
+      buildPopupMenuItem<String>(
+        value: 'remove_from_recents',
+        icon: FluentIcons.delete_24_regular,
+        label: removeFromRecentlyPlayedText,
+        colorScheme: colorScheme,
+      ),
+    if (!offlineMode.value || songOfflineStatus.value)
+      PopupMenuItem<String>(
+        value: 'offline',
+        child: ValueListenableBuilder<bool>(
+          valueListenable: songOfflineStatus,
+          builder: (_, value, __) {
+            return Row(
+              children: [
+                Icon(
+                  value
+                      ? FluentIcons.cloud_dismiss_24_regular
+                      : FluentIcons.cloud_arrow_down_24_regular,
+                  color: colorScheme.primary,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  value ? removeOfflineText : makeOfflineText,
+                  style: TextStyle(color: colorScheme.onSurface),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+  ];
+}
+
+Future<void> _handleSongMenuAction({
+  required BuildContext context,
+  required String value,
+  required dynamic song,
+  required String ytid,
+  required ValueNotifier<bool> songLikeStatus,
+  required ValueNotifier<bool> songOfflineStatus,
+  VoidCallback? onRemove,
+  FutureOr<void> Function()? onRename,
+}) async {
+  switch (value) {
+    case 'play_next':
+      await audioHandler.playNext(song);
+      showToast(
+        context,
+        context.l10n!.songAdded,
+        duration: const Duration(seconds: 1),
+      );
+      break;
+    case 'go_to_artist':
+      final artistName = song is Map
+          ? (song['artist']?.toString().trim() ?? '')
+          : '';
+      if (artistName.isEmpty) return;
+      unawaited(
+        context.push(
+          '${NavigationManager.searchPath}/artist/${Uri.encodeComponent(artistName)}',
+          extra: {'title': artistName, 'ytid': artistName},
+        ),
+      );
+      break;
+    case 'add_to_queue':
+      await audioHandler.addToQueue(song);
+      showToast(
+        context,
+        context.l10n!.songAdded,
+        duration: const Duration(seconds: 1),
+      );
+      break;
+    case 'like':
+      final newValue = !songLikeStatus.value;
+      songLikeStatus.value = newValue;
+      showToast(
+        context,
+        newValue
+            ? context.l10n!.addedToLikedSongs
+            : context.l10n!.removedFromLikedSongs,
+        duration: const Duration(seconds: 1),
+      );
+      try {
+        await updateSongLikeStatus(ytid, newValue, songData: song);
+      } catch (e) {
+        logger.log('Error updating song like status', error: e);
+        songLikeStatus.value = !newValue;
+      }
+      break;
+    case 'remove':
+      onRemove?.call();
+      break;
+    case 'rename':
+      await onRename?.call();
+      break;
+    case 'add_to_playlist':
+      showAddToPlaylistDialog(context, song: song);
+      break;
+    case 'remove_from_recents':
+      try {
+        await removeFromRecentlyPlayed(ytid);
+      } catch (e) {
+        logger.log('Error removing from recently played', error: e);
+      }
+      break;
+    case 'offline':
+      await _toggleSongOfflineStatus(context, song, ytid, songOfflineStatus);
+      break;
+  }
+}
+
+Future<void> _toggleSongOfflineStatus(
+  BuildContext context,
+  dynamic song,
+  String ytid,
+  ValueNotifier<bool> songOfflineStatus,
+) async {
+  final originalValue = songOfflineStatus.value;
+  songOfflineStatus.value = !originalValue;
+
+  try {
+    final bool success;
+    if (originalValue) {
+      success = await removeSongFromOffline(ytid);
+      if (success && context.mounted) {
+        showToast(context, context.l10n!.songRemovedFromOffline);
+      }
+    } else {
+      success = await makeSongOffline(song);
+      if (success && context.mounted) {
+        showToast(context, context.l10n!.songAddedToOffline);
+      }
+    }
+
+    if (!success) {
+      songOfflineStatus.value = originalValue;
+    }
+  } catch (e) {
+    songOfflineStatus.value = originalValue;
+    logger.log('Error toggling offline status', error: e);
+    if (context.mounted) {
+      showToast(context, context.l10n!.error);
+    }
+  }
+}
 
 class SongBar extends StatefulWidget {
   const SongBar(
@@ -52,6 +291,8 @@ class SongBar extends StatefulWidget {
     this.showPlayTime = false,
     this.playlistId,
     this.onRenamed,
+    this.rank,
+    this.barPadding,
     super.key,
   });
 
@@ -68,7 +309,8 @@ class SongBar extends StatefulWidget {
   final bool showQueueActions;
   final String? playlistId;
   final VoidCallback? onRenamed;
-
+  final EdgeInsetsGeometry? barPadding;
+  final int? rank;
   @override
   State<SongBar> createState() => _SongBarState();
 }
@@ -102,6 +344,22 @@ class _SongBarState extends State<SongBar> {
     _songLikeStatus = ValueNotifier(isSongAlreadyLiked(_ytid));
     final isOffline = isSongAlreadyOffline(_ytid);
     _songOfflineStatus = ValueNotifier(isOffline);
+    userLikedSongsList.addListener(_syncLikeStatus);
+    userOfflineSongs.addListener(_syncOfflineStatus);
+  }
+
+  void _syncLikeStatus() {
+    final newStatus = isSongAlreadyLiked(_ytid);
+    if (_songLikeStatus.value != newStatus) {
+      _songLikeStatus.value = newStatus;
+    }
+  }
+
+  void _syncOfflineStatus() {
+    final newStatus = isSongAlreadyOffline(_ytid);
+    if (_songOfflineStatus.value != newStatus) {
+      _songOfflineStatus.value = newStatus;
+    }
   }
 
   @override
@@ -122,6 +380,8 @@ class _SongBarState extends State<SongBar> {
 
   @override
   void dispose() {
+    userLikedSongsList.removeListener(_syncLikeStatus);
+    userOfflineSongs.removeListener(_syncOfflineStatus);
     _songLikeStatus.dispose();
     _songOfflineStatus.dispose();
     super.dispose();
@@ -137,31 +397,63 @@ class _SongBarState extends State<SongBar> {
                     0
         : null;
 
-    return Padding(
-      padding: commonBarPadding,
-      child: Material(
-        color: widget.backgroundColor ?? colorScheme.surfaceContainerLow,
-        borderRadius: widget.borderRadius,
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: _handleSongTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-            child: Row(
-              children: [
-                _buildAlbumArt(colorScheme),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: _SongInfo(
-                    title: _songTitle,
-                    artist: _songArtist,
-                    plays: _plays,
-                    colorScheme: colorScheme,
+    return Material(
+      color: widget.backgroundColor ?? colorScheme.surfaceContainerLow,
+      borderRadius: widget.borderRadius,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: _handleSongTap,
+        child: Padding(
+          padding:
+              widget.barPadding ??
+              const EdgeInsetsDirectional.symmetric(
+                vertical: 10,
+                horizontal: 12,
+              ),
+          child: Row(
+            children: [
+              if (widget.rank != null) ...[
+                SizedBox(
+                  width: 28,
+                  child: Text(
+                    '${widget.rank}',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: colorScheme.primary,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                 ),
-                _buildActionButtons(context, colorScheme),
+                const SizedBox(width: 10),
               ],
-            ),
+
+              _buildAlbumArt(colorScheme),
+              const SizedBox(width: 14),
+
+              Expanded(
+                child: _SongInfo(
+                  title: _songTitle,
+                  artist: _songArtist,
+                  plays: _plays,
+                  colorScheme: colorScheme,
+                ),
+              ),
+
+              OverflowMenuButton<String>(
+                onSelected: (value) => _handleSongMenuAction(
+                  context: context,
+                  value: value,
+                  song: widget.song,
+                  ytid: _ytid,
+                  songLikeStatus: _songLikeStatus,
+                  songOfflineStatus: _songOfflineStatus,
+                  onRemove: widget.onRemove,
+                  onRename: () => _handleRenameSong(context),
+                ),
+                itemBuilder: (context) => _buildMenuItems(context, colorScheme),
+              ),
+            ],
           ),
         ),
       ),
@@ -185,111 +477,16 @@ class _SongBarState extends State<SongBar> {
     final isDurationAvailable =
         widget.showMusicDuration && widget.song['duration'] != null;
 
-    return ValueListenableBuilder<bool>(
-      valueListenable: _songLikeStatus,
-      builder: (_, isLiked, __) {
-        return ValueListenableBuilder<bool>(
-          valueListenable: _songOfflineStatus,
-          builder: (_, isOffline, __) {
-            if (isOffline && _artworkPath != null) {
-              return _OfflineArtwork(
-                artworkPath: _artworkPath,
-                size: size,
-                colorScheme: colorScheme,
-              );
-            }
-
-            return _OnlineArtwork(
-              lowResImageUrl: _lowResImageUrl,
-              size: size,
-              isDurationAvailable: isDurationAvailable,
-              colorScheme: colorScheme,
-              duration: widget.song['duration'],
-              isOffline: isOffline,
-              isLiked: isLiked,
-            );
-          },
-        );
-      },
+    return _ArtworkDisplay(
+      lowResImageUrl: _lowResImageUrl,
+      artworkPath: _artworkPath,
+      size: size,
+      isDurationAvailable: isDurationAvailable,
+      colorScheme: colorScheme,
+      offlineStatus: _songOfflineStatus,
+      likeStatus: _songLikeStatus,
+      duration: widget.song['duration'],
     );
-  }
-
-  Widget _buildActionButtons(BuildContext context, ColorScheme colorScheme) {
-    return SizedBox(
-      width: 40,
-      height: 40,
-      child: Center(
-        child: PopupMenuButton<String>(
-          icon: Icon(
-            FluentIcons.more_vertical_24_regular,
-            color: colorScheme.onSurfaceVariant,
-            size: 20,
-          ),
-          padding: EdgeInsets.zero,
-          onSelected: (value) => _handleMenuAction(context, value),
-          itemBuilder: (context) => _buildMenuItems(context, colorScheme),
-        ),
-      ),
-    );
-  }
-
-  void _handleMenuAction(BuildContext context, String value) {
-    switch (value) {
-      case 'play_next':
-        audioHandler.playNext(widget.song);
-        showToast(
-          context,
-          context.l10n!.songAdded,
-          duration: const Duration(seconds: 1),
-        );
-        break;
-      case 'add_to_queue':
-        audioHandler.addToQueue(widget.song);
-        showToast(
-          context,
-          context.l10n!.songAdded,
-          duration: const Duration(seconds: 1),
-        );
-        break;
-      case 'like':
-        final newValue = !_songLikeStatus.value;
-        _songLikeStatus.value = newValue;
-        final likedSongsLength = currentLikedSongsLength.value;
-        currentLikedSongsLength.value = newValue
-            ? likedSongsLength + 1
-            : likedSongsLength - 1;
-        updateSongLikeStatus(_ytid, newValue).catchError((e) {
-          logger.log('Error updating song like status', error: e);
-          // Revert on error
-          _songLikeStatus.value = !newValue;
-          currentLikedSongsLength.value = likedSongsLength;
-        });
-        showToast(
-          context,
-          newValue
-              ? context.l10n!.addedToLikedSongs
-              : context.l10n!.removedFromLikedSongs,
-          duration: const Duration(seconds: 1),
-        );
-        break;
-      case 'remove':
-        widget.onRemove?.call();
-        break;
-      case 'rename':
-        _handleRenameSong(context);
-        break;
-      case 'add_to_playlist':
-        showAddToPlaylistDialog(context, song: widget.song);
-        break;
-      case 'remove_from_recents':
-        removeFromRecentlyPlayed(_ytid).catchError((e) {
-          logger.log('Error removing from recently played', error: e);
-        });
-        break;
-      case 'offline':
-        unawaited(_handleOfflineToggle(context));
-        break;
-    }
   }
 
   void _handleRenameSong(BuildContext context) {
@@ -348,196 +545,23 @@ class _SongBarState extends State<SongBar> {
     }
   }
 
-  Future<void> _handleOfflineToggle(BuildContext context) async {
-    final originalValue = _songOfflineStatus.value;
-    _songOfflineStatus.value = !originalValue;
-
-    try {
-      final bool success;
-      if (originalValue) {
-        success = await removeSongFromOffline(_ytid);
-        if (success && context.mounted) {
-          showToast(context, context.l10n!.songRemovedFromOffline);
-        }
-      } else {
-        success = await makeSongOffline(widget.song);
-        if (success && context.mounted) {
-          showToast(context, context.l10n!.songAddedToOffline);
-        }
-      }
-
-      // Revert if operation failed
-      if (!success) {
-        _songOfflineStatus.value = originalValue;
-      }
-    } catch (e) {
-      // Revert on error
-      _songOfflineStatus.value = originalValue;
-      logger.log('Error toggling offline status', error: e);
-      if (context.mounted) {
-        showToast(context, context.l10n!.error);
-      }
-    }
-  }
-
   List<PopupMenuEntry<String>> _buildMenuItems(
     BuildContext context,
     ColorScheme colorScheme,
   ) {
-    // Capture localization strings before building menu items to avoid
-    // accessing context.l10n inside ValueListenableBuilder which can fail
-    // when the widget is being disposed
-    final l10n = context.l10n!;
-    final playNextText = l10n.playNext;
-    final addToQueueText = l10n.addToQueue;
-    final removeFromLikedSongsText = l10n.removeFromLikedSongs;
-    final addToLikedSongsText = l10n.addToLikedSongs;
-    final removeFromPlaylistText = l10n.removeFromPlaylist;
-    final addToPlaylistText = l10n.addToPlaylist;
-    final removeFromRecentlyPlayedText = l10n.removeFromRecentlyPlayed;
-    final removeOfflineText = l10n.removeOffline;
-    final makeOfflineText = l10n.makeOffline;
-    final renameSongText = l10n.renameSong;
     final canRename = widget.isFromLikedSongs || widget.playlistId != null;
 
-    return [
-      if (widget.showQueueActions)
-        PopupMenuItem<String>(
-          value: 'play_next',
-          child: Row(
-            children: [
-              Icon(
-                FluentIcons.receipt_play_24_regular,
-                color: colorScheme.primary,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                playNextText,
-                style: TextStyle(color: colorScheme.secondary),
-              ),
-            ],
-          ),
-        ),
-      if (widget.showQueueActions)
-        PopupMenuItem<String>(
-          value: 'add_to_queue',
-          child: Row(
-            children: [
-              Icon(
-                FluentIcons.text_bullet_list_add_24_regular,
-                color: colorScheme.primary,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                addToQueueText,
-                style: TextStyle(color: colorScheme.secondary),
-              ),
-            ],
-          ),
-        ),
-      if (!offlineMode.value)
-        PopupMenuItem<String>(
-          value: 'like',
-          child: ValueListenableBuilder<bool>(
-            valueListenable: _songLikeStatus,
-            builder: (_, value, __) {
-              return Row(
-                children: [
-                  Icon(
-                    likeStatusToIconMapper[value],
-                    color: colorScheme.primary,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    value ? removeFromLikedSongsText : addToLikedSongsText,
-                    style: TextStyle(color: colorScheme.secondary),
-                  ),
-                ],
-              );
-            },
-          ),
-        ),
-      if (canRename)
-        PopupMenuItem<String>(
-          value: 'rename',
-          child: Row(
-            children: [
-              Icon(FluentIcons.edit_24_regular, color: colorScheme.primary),
-              const SizedBox(width: 8),
-              Text(
-                renameSongText,
-                style: TextStyle(color: colorScheme.secondary),
-              ),
-            ],
-          ),
-        ),
-      if (widget.onRemove != null)
-        PopupMenuItem<String>(
-          value: 'remove',
-          child: Row(
-            children: [
-              Icon(FluentIcons.delete_24_regular, color: colorScheme.primary),
-              const SizedBox(width: 8),
-              Text(
-                removeFromPlaylistText,
-                style: TextStyle(color: colorScheme.secondary),
-              ),
-            ],
-          ),
-        ),
-      if (!offlineMode.value)
-        PopupMenuItem<String>(
-          value: 'add_to_playlist',
-          child: Row(
-            children: [
-              Icon(FluentIcons.album_add_24_regular, color: colorScheme.primary),
-              const SizedBox(width: 8),
-              Text(
-                addToPlaylistText,
-                style: TextStyle(color: colorScheme.secondary),
-              ),
-            ],
-          ),
-        ),
-      if (widget.isRecentSong == true)
-        PopupMenuItem<String>(
-          value: 'remove_from_recents',
-          child: Row(
-            children: [
-              Icon(FluentIcons.delete_24_regular, color: colorScheme.primary),
-              const SizedBox(width: 8),
-              Text(
-                removeFromRecentlyPlayedText,
-                style: TextStyle(color: colorScheme.secondary),
-              ),
-            ],
-          ),
-        ),
-      if (!offlineMode.value || _songOfflineStatus.value)
-        PopupMenuItem<String>(
-          value: 'offline',
-          child: ValueListenableBuilder<bool>(
-            valueListenable: _songOfflineStatus,
-            builder: (_, value, __) {
-              return Row(
-                children: [
-                  Icon(
-                    value
-                        ? FluentIcons.cloud_dismiss_24_regular
-                        : FluentIcons.cloud_arrow_down_24_regular,
-                    color: colorScheme.primary,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    value ? removeOfflineText : makeOfflineText,
-                    style: TextStyle(color: colorScheme.secondary),
-                  ),
-                ],
-              );
-            },
-          ),
-        ),
-    ];
+    return _buildSongMenuItems(
+      context: context,
+      colorScheme: colorScheme,
+      songLikeStatus: _songLikeStatus,
+      songOfflineStatus: _songOfflineStatus,
+      showQueueActions: widget.showQueueActions,
+      isRecentSong: widget.isRecentSong == true,
+      canRename: canRename,
+      canRemove: widget.onRemove != null,
+      showGoToArtist: _songArtist.isNotEmpty,
+    );
   }
 }
 
@@ -782,6 +806,59 @@ class _OnlineArtwork extends StatelessWidget {
             ),
         ],
       ),
+    );
+  }
+}
+
+class _ArtworkDisplay extends StatelessWidget {
+  const _ArtworkDisplay({
+    required this.lowResImageUrl,
+    required this.artworkPath,
+    required this.size,
+    required this.isDurationAvailable,
+    required this.colorScheme,
+    required this.offlineStatus,
+    required this.likeStatus,
+    required this.duration,
+  });
+
+  final String lowResImageUrl;
+  final String? artworkPath;
+  final double size;
+  final bool isDurationAvailable;
+  final ColorScheme colorScheme;
+  final ValueListenable<bool> offlineStatus;
+  final ValueListenable<bool> likeStatus;
+  final dynamic duration;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: offlineStatus,
+      builder: (_, isOffline, __) {
+        if (isOffline && artworkPath != null) {
+          return _OfflineArtwork(
+            artworkPath: artworkPath!,
+            size: size,
+            colorScheme: colorScheme,
+          );
+        }
+
+        return ValueListenableBuilder<bool>(
+          valueListenable: likeStatus,
+          builder: (_, isLiked, __) {
+            return _OnlineArtwork(
+              lowResImageUrl: lowResImageUrl,
+              size: size,
+              isDurationAvailable: isDurationAvailable,
+              colorScheme: colorScheme,
+              duration: duration,
+              isOffline: isOffline,
+              isLiked: isLiked,
+            );
+          },
+        );
+      },
     );
   }
 }

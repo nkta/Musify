@@ -32,13 +32,20 @@ import 'package:musify/widgets/marquee.dart';
 import 'package:musify/widgets/song_artwork.dart';
 import 'package:rxdart/rxdart.dart';
 
-final Stream<FullPlayerState> _fullPlayerStateStream = Rx.combineLatest3(
-  audioHandler.playbackState.distinct(),
-  audioHandler.queue.distinct(),
-  audioHandler.positionDataStream,
-  (PlaybackState state, List<MediaItem> queue, PositionData pos) =>
-      FullPlayerState(playbackState: state, queue: queue, position: pos),
-).debounceTime(const Duration(milliseconds: 100)).asBroadcastStream();
+final Stream<FullPlayerState> _fullPlayerStateStream =
+    Rx.combineLatest3(
+          audioHandler.playbackStateStream,
+          audioHandler.queue.distinct(),
+          audioHandler.positionDataStream,
+          (PlaybackState state, List<MediaItem> queue, PositionData pos) =>
+              FullPlayerState(
+                playbackState: state,
+                queue: queue,
+                position: pos,
+              ),
+        )
+        .throttleTime(const Duration(milliseconds: 120), trailing: true)
+        .asBroadcastStream();
 
 class MiniPlayer extends StatelessWidget {
   const MiniPlayer({super.key});
@@ -158,7 +165,9 @@ class _MiniPlayerBodyState extends State<_MiniPlayerBody>
     final metadata = widget.metadata;
     final state = widget.state;
 
-    final totalDuration = metadata.duration ?? Duration.zero;
+    final totalDuration = state.position.duration > Duration.zero
+        ? state.position.duration
+        : (metadata.duration ?? Duration.zero);
     final progress = totalDuration.inMilliseconds == 0
         ? 0.0
         : (state.position.position.inMilliseconds /
@@ -180,6 +189,7 @@ class _MiniPlayerBodyState extends State<_MiniPlayerBody>
               height: MiniPlayer.playerHeight,
               decoration: BoxDecoration(
                 color: colorScheme.surfaceContainerHigh,
+                borderRadius: BorderRadius.circular(MiniPlayer._borderRadius),
                 boxShadow: [
                   BoxShadow(
                     color: colorScheme.shadow.withValues(alpha: 0.08),
@@ -449,39 +459,63 @@ class _CircularProgressPainter extends CustomPainter {
   final Color progressColor;
   final double strokeWidth;
 
+  final waveAmplitude = 1.5;
+  final waveFrequency = 12.0;
+  final animationValue = 0.0;
+
+  Path _buildWavyArcPath(Size size, double startAngle, double sweepAngle) {
+    final cx = size.width / 2;
+    final cy = size.height / 2;
+    final baseRadius = (size.width - strokeWidth) / 2;
+    final steps = (sweepAngle.abs() * 180 / math.pi).round().clamp(4, 720);
+    final path = Path();
+
+    for (var i = 0; i <= steps; i++) {
+      final t = i / steps;
+      final angle = startAngle + sweepAngle * t;
+      final wave =
+          waveAmplitude * math.sin(waveFrequency * angle + animationValue);
+      final r = baseRadius + wave;
+      final x = cx + r * math.cos(angle);
+      final y = cy + r * math.sin(angle);
+      i == 0 ? path.moveTo(x, y) : path.lineTo(x, y);
+    }
+    return path;
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = (size.width - strokeWidth) / 2;
-
-    final backgroundPaint = Paint()
+    final trackPaint = Paint()
       ..color = backgroundColor
       ..style = PaintingStyle.stroke
       ..strokeWidth = strokeWidth
-      ..strokeCap = StrokeCap.round;
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
 
-    canvas.drawCircle(center, radius, backgroundPaint);
-
-    final progressPaint = Paint()
-      ..color = progressColor
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = strokeWidth
-      ..strokeCap = StrokeCap.round;
-
-    final sweepAngle = 2 * math.pi * progress;
-    canvas.drawArc(
-      Rect.fromCircle(center: center, radius: radius),
-      -math.pi / 2,
-      sweepAngle,
-      false,
-      progressPaint,
+    canvas.drawPath(
+      _buildWavyArcPath(size, -math.pi / 2, 2 * math.pi),
+      trackPaint,
     );
+
+    if (progress > 0) {
+      final progressPaint = Paint()
+        ..color = progressColor
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = strokeWidth
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round;
+
+      canvas.drawPath(
+        _buildWavyArcPath(size, -math.pi / 2, 2 * math.pi * progress),
+        progressPaint,
+      );
+    }
   }
 
   @override
-  bool shouldRepaint(_CircularProgressPainter oldDelegate) {
-    return oldDelegate.progress != progress ||
-        oldDelegate.backgroundColor != backgroundColor ||
-        oldDelegate.progressColor != progressColor;
-  }
+  bool shouldRepaint(_CircularProgressPainter old) =>
+      old.progress != progress ||
+      old.backgroundColor != backgroundColor ||
+      old.progressColor != progressColor ||
+      old.animationValue != animationValue;
 }
