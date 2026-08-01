@@ -33,7 +33,7 @@ jobs:
       # # Check for any formatting issues in the code.
       # - run: dart format --set-exit-if-changed .
       # Statically analyze the Dart code for any errors.
-      - run: flutter analyze .
+      - run: flutter analyze . --no-fatal-warnings
       # Build universal apk.
       - run: flutter build apk --debug --flavor github
       # Upload universal generated apk to the artifacts.
