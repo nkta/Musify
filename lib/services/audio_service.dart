@@ -1754,107 +1754,6 @@ class MusifyAudioHandler extends BaseAudioHandler {
   static const _rootRecent = 'recently_played';
   static const _rootQueue = 'current_queue';
 
-  @override
-  Future<List<MediaItem>> getChildren(
-    String parentMediaId, [
-    Map<String, dynamic>? options,
-  ]) async {
-    if (parentMediaId == AudioService.recentRootId) {
-      final recentSong = _latestResumableSong();
-      final recentItem = recentSong == null
-          ? null
-          : _mediaItemForResumption(recentSong);
-      return recentItem == null ? [] : [recentItem];
-    }
-
-    if (parentMediaId == AudioService.browsableRootId) {
-      return [
-        const MediaItem(
-          id: _rootQueue,
-          title: 'Now Playing Queue',
-          playable: false,
-          extras: {'isBrowsable': true},
-        ),
-        const MediaItem(
-          id: _rootLiked,
-          title: 'Liked Songs',
-          playable: false,
-          extras: {'isBrowsable': true},
-        ),
-        const MediaItem(
-          id: _rootOffline,
-          title: 'Downloaded',
-          playable: false,
-          extras: {'isBrowsable': true},
-        ),
-        const MediaItem(
-          id: _rootRecent,
-          title: 'Recently Played',
-          playable: false,
-          extras: {'isBrowsable': true},
-        ),
-      ];
-    }
-
-    switch (parentMediaId) {
-      case _rootQueue:
-        return _queueList.map(_getMediaItemForQueue).toList();
-      case _rootLiked:
-        return userLikedSongsList.value
-            .whereType<Map>()
-            .map((s) => mapToMediaItem(s).copyWith(playable: true))
-            .toList();
-      case _rootOffline:
-        return userOfflineSongs.value
-            .whereType<Map>()
-            .map((s) => mapToMediaItem(s).copyWith(playable: true))
-            .toList();
-      case _rootRecent:
-        return userRecentlyPlayed.value
-            .whereType<Map>()
-            .map((s) => mapToMediaItem(s).copyWith(playable: true))
-            .toList();
-      default:
-        return [];
-    }
-  }
-
-  @override
-  Future<void> playFromSearch(
-    String query, [
-    Map<String, dynamic>? extras,
-  ]) async {
-    if (query.trim().isEmpty) {
-      // "Play music" with no specifics
-      if (_queueList.isNotEmpty) {
-        await play();
-        return;
-      }
-      final recentSong = _latestResumableSong();
-      if (recentSong != null) await _playResumableSong(recentSong);
-      return;
-    }
-
-    final q = query.toLowerCase();
-    final candidates = [
-      ..._queueList,
-      ...userLikedSongsList.value.whereType<Map>(),
-      ...userOfflineSongs.value.whereType<Map>(),
-      ...userRecentlyPlayed.value.whereType<Map>(),
-    ];
-
-    final match = candidates.firstWhere((s) {
-      final title = s['title']?.toString().toLowerCase() ?? '';
-      final artist = s['artist']?.toString().toLowerCase() ?? '';
-      return title.contains(q) || artist.contains(q);
-    }, orElse: () => const {});
-
-    if (match.isNotEmpty) {
-      await _playResumableSong(match);
-    } else {
-      logger.log('playFromSearch: no local match for "$query"');
-    }
-  }
 
   @override
   Future<MediaItem?> getMediaItem(String mediaId) async {
@@ -1889,17 +1788,6 @@ class MusifyAudioHandler extends BaseAudioHandler {
   }
 
   @override
-  Future<void> playFromMediaId(
-    String mediaId, [
-    Map<String, dynamic>? extras,
-  ]) async {
-    final song = _findSongByYtid(_ytidFromMediaId(mediaId));
-    if (song == null) {
-      logger.log('No resumable song found for media id: $mediaId');
-      return;
-    }
-    await _playResumableSong(song);
-  }
 
   @override
   Future<void> onTaskRemoved() async {
@@ -2994,17 +2882,17 @@ class MusifyAudioHandler extends BaseAudioHandler {
         case _autoRecentId:
           return _autoSongItems(
             _autoRecentId,
-            List<Map>.from(userRecentlyPlayed.whereType<Map>()),
+            List<Map>.from(userRecentlyPlayed.value.whereType<Map>()),
           );
         case _autoLikedId:
           return _autoSongItems(
             _autoLikedId,
-            List<Map>.from(userLikedSongsList.whereType<Map>()),
+            List<Map>.from(userLikedSongsList.value.whereType<Map>()),
           );
         case _autoOfflineId:
           return _autoSongItems(
             _autoOfflineId,
-            List<Map>.from(userOfflineSongs.whereType<Map>()),
+            List<Map>.from(userOfflineSongs.value.whereType<Map>()),
           );
         case _autoPlaylistsId:
           return _autoPlaylistItems();
@@ -3174,11 +3062,11 @@ class MusifyAudioHandler extends BaseAudioHandler {
 
     switch (parentId) {
       case _autoLikedId:
-        return List<Map>.from(userLikedSongsList.whereType<Map>());
+        return List<Map>.from(userLikedSongsList.value.whereType<Map>());
       case _autoRecentId:
-        return List<Map>.from(userRecentlyPlayed.whereType<Map>());
+        return List<Map>.from(userRecentlyPlayed.value.whereType<Map>());
       case _autoOfflineId:
-        return List<Map>.from(userOfflineSongs.whereType<Map>());
+        return List<Map>.from(userOfflineSongs.value.whereType<Map>());
     }
 
     if (parentId.startsWith(_autoPlaylistPrefix)) {
@@ -3267,9 +3155,9 @@ class MusifyAudioHandler extends BaseAudioHandler {
         // Voice commands like "play music" arrive with an empty query.
         if (_queueList.isNotEmpty) {
           await play();
-        } else if (userRecentlyPlayed.isNotEmpty) {
+        } else if (userRecentlyPlayed.value.isNotEmpty) {
           await addPlaylistToQueue(
-            List<Map>.from(userRecentlyPlayed.whereType<Map>()),
+            List<Map>.from(userRecentlyPlayed.value.whereType<Map>()),
             replace: true,
             startIndex: 0,
           );
