@@ -1,5 +1,5 @@
 on: workflow_dispatch
-name: Build debug apk
+name: Build release apk
 
 jobs:
   build:
@@ -37,10 +37,10 @@ jobs:
       # introduces benign lint noise). The `flutter build apk` step below is
       # the real compile gate.
       - run: flutter analyze . --no-fatal-warnings || true
-      # Build universal apk.
-      - run: flutter build apk --debug --flavor github
+      # Build universal apk in RELEASE mode (signed with debug key if no keystore).
+      - run: flutter build apk --release --flavor github
       # Upload universal generated apk to the artifacts.
       - uses: actions/upload-artifact@v4
         with:
-          name: Musify-debug.apk
-          path: build/app/outputs/flutter-apk/app-github-debug.apk
+          name: Musify-release.apk
+          path: build/app/outputs/flutter-apk/app-github-release.apk
