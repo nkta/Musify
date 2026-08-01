@@ -2969,7 +2969,7 @@ class MusifyAudioHandler extends BaseAudioHandler {
     }
 
     getUserCustomPlaylists().forEach(addPlaylist);
-    userLikedPlaylists.forEach(addPlaylist);
+    userLikedPlaylists.value.forEach(addPlaylist);
 
     // YouTube playlist metadata requires one network call per playlist.
     // Android Auto drops children that arrive too late, so serve cached
@@ -3038,7 +3038,7 @@ class MusifyAudioHandler extends BaseAudioHandler {
     if (customPlaylist.isNotEmpty) {
       songs = customPlaylist['list'] as List? ?? [];
     } else {
-      final likedPlaylist = userLikedPlaylists.firstWhere(
+      final likedPlaylist = userLikedPlaylists.value.firstWhere(
         (playlist) => playlist['ytid']?.toString() == playlistId,
         orElse: () => <String, dynamic>{},
       );
