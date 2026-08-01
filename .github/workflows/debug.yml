@@ -1,6 +1,9 @@
 on: workflow_dispatch
 name: Build release apk
 
+env:
+  PROPERTIES_PATH: './android/key.properties'
+
 jobs:
   build:
     name: Build APK
@@ -37,7 +40,13 @@ jobs:
       # introduces benign lint noise). The `flutter build apk` step below is
       # the real compile gate.
       - run: flutter analyze . --no-fatal-warnings || true
-      # Build universal apk in RELEASE mode (signed with debug key if no keystore).
+      # Inject the release signing keystore (created 2026-08-01, nkta).
+      - run: |
+          echo keyPassword=${{ secrets.KEY_STORE }} > ${{ env.PROPERTIES_PATH }}
+          echo storePassword=${{ secrets.KEY_PASSWORD }} >> ${{ env.PROPERTIES_PATH }}
+          echo keyAlias=${{ secrets.KEY_ALIAS }} >> ${{ env.PROPERTIES_PATH }}
+      - run: echo "${{ secrets.KEYSTORE2 }}" | base64 --decode > android/app/key.jks
+      # Build universal apk in RELEASE mode, signed with the nkta keystore.
       - run: flutter build apk --release --flavor github
       # Upload universal generated apk to the artifacts.
       - uses: actions/upload-artifact@v4
