@@ -21,7 +21,7 @@ subprojects {
 
 subprojects {
     tasks.withType<KotlinJvmCompile>().configureEach {
-        compilerOptions.jvmTarget.set(JvmTarget.JVM_1_8)
+        compilerOptions.jvmTarget.set(JvmTarget.JVM_17)
     }
 }
 
