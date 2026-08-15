@@ -16,7 +16,7 @@
  *
  *
  *     For more information about Musify, including how to contribute,
- *     please visit: https://github.com/gokadzev/Musify
+ *     please visit: https://github.com/nkta/Musify
  */
 
 import 'dart:convert';
