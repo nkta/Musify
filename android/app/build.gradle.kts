@@ -44,6 +44,12 @@ android {
         abortOnError = false
     }
 
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
     defaultConfig {
         applicationId = "com.gokadzev.musify"
         minSdk = 24

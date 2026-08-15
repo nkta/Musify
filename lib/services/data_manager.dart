@@ -20,10 +20,11 @@
  */
 
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/material.dart';
 import 'package:hive/hive.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:musify/extensions/l10n.dart';
 import 'package:musify/main.dart' show logger;
 
@@ -44,6 +45,12 @@ class _CacheEntry {
   bool isValid(Duration cacheDuration) {
     return DateTime.now().difference(timestamp) < cacheDuration;
   }
+}
+
+DateTime? _parseCacheDate(dynamic value) {
+  if (value is DateTime) return value;
+  if (value is String) return DateTime.tryParse(value);
+  return null;
 }
 
 // Maximum number of entries allowed in the memory cache
@@ -118,7 +125,8 @@ Future<dynamic> getData(
 
   // Store in memory cache for faster access next time
   if (data != null && category == 'cache') {
-    final timestamp = await _box.get('${key}_date') ?? DateTime.now();
+    final timestamp =
+        _parseCacheDate(await _box.get('${key}_date')) ?? DateTime.now();
     _setMemoryCacheEntry(cacheKey, _CacheEntry(data, timestamp));
   }
 
@@ -162,17 +170,21 @@ Future<void> cleanupOldCacheEntries() async {
     for (final key in keys) {
       final dateKey = '${key}_date';
       final date = cacheBox.get(dateKey);
+      final cacheKey = 'cache_$key';
 
-      if (date == null) {
+      if (_parseCacheDate(date) == null) {
         await cacheBox.delete(key);
+        await cacheBox.delete(dateKey);
+        _memoryCache.remove(cacheKey);
         continue;
       }
 
-      final age = now.difference(date);
+      final age = now.difference(_parseCacheDate(date)!);
       // Very old cache entries (older than 30 days) should be removed
       if (age > const Duration(days: 30)) {
         await cacheBox.delete(key);
         await cacheBox.delete(dateKey);
+        _memoryCache.remove(cacheKey);
       }
     }
   } catch (e, stackTrace) {
@@ -186,7 +198,7 @@ Future<void> cleanupOldCacheEntries() async {
 
 // Check if the cache is still valid based on the caching duration
 bool isCacheValid(Box box, String key, Duration cachingDuration) {
-  final date = box.get('${key}_date');
+  final date = _parseCacheDate(box.get('${key}_date'));
   if (date == null) {
     return false;
   }
@@ -217,15 +229,6 @@ Future<({String message, bool success})> backupData(
   BuildContext context,
 ) async {
   final boxNames = ['user', 'settings'];
-  final dlPath = await FilePicker.getDirectoryPath();
-
-  if (dlPath == null) {
-    return (message: '${context.l10n!.chooseBackupDir}!', success: false);
-  }
-
-  if (!dlPath.contains('Documents') && !dlPath.contains('Download')) {
-    return (message: context.l10n!.folderRestrictions, success: false);
-  }
 
   try {
     for (final boxName in boxNames) {
@@ -234,25 +237,6 @@ Future<({String message, bool success})> backupData(
       if (box.path == null) {
         logger.log('Box path is null for $boxName');
         continue;
-      }
-
-      final sourceFile = File(box.path!);
-      final targetFile = File('$dlPath/$boxName.hive');
-
-      // Ensure the target directory exists
-      await targetFile.parent.create(recursive: true);
-
-      // Safely handle existing backup file
-      if (await targetFile.exists()) {
-        try {
-          await targetFile.delete();
-        } catch (e) {
-          // If delete fails, try with a timestamp suffix
-          final timestamp = DateTime.now().millisecondsSinceEpoch;
-          final newTargetFile = File('$dlPath/${boxName}_$timestamp.hive');
-          await sourceFile.copy(newTargetFile.path);
-          continue;
-        }
       }
 
       // Compact the box before copying
@@ -266,13 +250,20 @@ Future<({String message, bool success})> backupData(
         );
       }
 
-      // Copy the box file to backup location
+      final sourceFile = File(box.path!);
       if (await sourceFile.exists()) {
-        await sourceFile.copy(targetFile.path);
-      } else {
-        logger.log(
-          'Source file does not exist for $boxName at ${sourceFile.path}',
+        final bytes = await sourceFile.readAsBytes();
+        final savedPath = await FilePicker.saveFile(
+          fileName: '$boxName.hive',
+          type: FileType.custom,
+          allowedExtensions: ['hive'],
+          bytes: Uint8List.fromList(bytes),
         );
+        if (savedPath == null) {
+          return (message: '${context.l10n!.chooseBackupDir}!', success: false);
+        }
+      } else {
+        throw StateError('Source file does not exist for $boxName');
       }
     }
 
@@ -287,94 +278,89 @@ Future<({String message, bool success})> restoreData(
   BuildContext context,
 ) async {
   final boxNames = ['user', 'settings'];
-  final result = await FilePicker.pickFiles(allowMultiple: true);
+  final result = await FilePicker.pickFiles(
+    type: FileType.custom,
+    allowedExtensions: ['hive'],
+  );
 
-  if (result == null || result.files.isEmpty) {
+  if (result.isEmpty) {
     return (message: '${context.l10n!.chooseBackupFiles}!', success: false);
   }
 
+  final selectedFiles = <String, PlatformFile>{};
+  for (final boxName in boxNames) {
+    final backupFile = result
+        .where(
+          (file) =>
+              file.name == '$boxName.hive' ||
+              file.name.startsWith('${boxName}_'),
+        )
+        .firstOrNull;
+    if (backupFile == null) {
+      return (
+        message: '${context.l10n!.chooseBackupFiles} ($boxName.hive)!',
+        success: false,
+      );
+    }
+    selectedFiles[boxName] = backupFile;
+  }
+
+  final boxPaths = <String, String>{};
+  for (final boxName in boxNames) {
+    final box = Hive.isBoxOpen(boxName)
+        ? Hive.box(boxName)
+        : await _openBox(boxName);
+    final path = box.path;
+    if (path == null) {
+      return (message: context.l10n!.restoreError, success: false);
+    }
+    boxPaths[boxName] = path;
+  }
+
+  final backupBytes = <String, Uint8List>{};
+  final originalBytes = <String, Uint8List>{};
+  for (final boxName in boxNames) {
+    final bytes = await _readPickedFile(selectedFiles[boxName]!);
+    backupBytes[boxName] = bytes;
+    originalBytes[boxName] = Uint8List.fromList(
+      await File(boxPaths[boxName]!).readAsBytes(),
+    );
+  }
+
+  final restoredBoxes = <String>[];
   try {
-    // Close all boxes before restoring to avoid conflicts
     for (final boxName in boxNames) {
       if (Hive.isBoxOpen(boxName)) {
-        try {
-          await Hive.box(boxName).close();
-        } catch (e, stackTrace) {
-          logger.log(
-            'Failed to close box $boxName',
-            error: e,
-            stackTrace: stackTrace,
-          );
-        }
+        await Hive.box(boxName).close();
       }
     }
-
-    // Small delay to ensure boxes are properly closed
-    await Future.delayed(const Duration(milliseconds: 100));
 
     for (final boxName in boxNames) {
-      final backupFile = result.files
-          .where(
-            (file) =>
-                file.name == '$boxName.hive' ||
-                file.name.startsWith('${boxName}_'),
-          )
-          .firstOrNull;
-
-      if (backupFile?.path != null) {
-        final sourceFile = File(backupFile!.path!);
-
-        if (await sourceFile.exists()) {
-          try {
-            // Get the original box path by temporarily opening the box
-            final tempBox = await Hive.openBox(boxName);
-            final boxPath = tempBox.path;
-            await tempBox.close();
-
-            if (boxPath != null) {
-              final targetFile = File(boxPath);
-
-              // Ensure target directory exists
-              await targetFile.parent.create(recursive: true);
-
-              // Delete existing file if it exists
-              if (await targetFile.exists()) {
-                try {
-                  await targetFile.delete();
-                } catch (e, stackTrace) {
-                  logger.log(
-                    'Failed to delete existing file',
-                    error: e,
-                    stackTrace: stackTrace,
-                  );
-                }
-              }
-
-              // Copy backup file to original location
-              await sourceFile.copy(targetFile.path);
-              logger.log(
-                'Restored $boxName from ${sourceFile.path} to ${targetFile.path}',
-              );
-            }
-          } catch (e, stackTrace) {
-            logger.log(
-              'Failed to restore $boxName',
-              error: e,
-              stackTrace: stackTrace,
-            );
-          }
-        } else {
-          logger.log('Backup file does not exist: ${sourceFile.path}');
-        }
-      } else {
-        logger.log('Backup file for $boxName not found in selection');
-      }
+      await _validateHiveBytes(boxName, backupBytes[boxName]!);
     }
 
-    // Small delay before reopening boxes
-    await Future.delayed(const Duration(milliseconds: 100));
+    for (final boxName in boxNames) {
+      await _replaceHiveFile(boxPaths[boxName]!, backupBytes[boxName]!);
+      restoredBoxes.add(boxName);
+      logger.log('Restored $boxName');
+    }
 
-    // Reopen boxes after restore
+    return (message: '${context.l10n!.restoredSuccess}!', success: true);
+  } catch (e, stackTrace) {
+    logger.log('Restore error', error: e, stackTrace: stackTrace);
+    for (final boxName in restoredBoxes.reversed) {
+      try {
+        await _replaceHiveFile(boxPaths[boxName]!, originalBytes[boxName]!);
+      } catch (rollbackError, rollbackStackTrace) {
+        logger.log(
+          'Failed to roll back $boxName after restore error',
+          error: rollbackError,
+          stackTrace: rollbackStackTrace,
+        );
+      }
+    }
+    return (message: '${context.l10n!.restoreError}: $e', success: false);
+  } finally {
     for (final boxName in boxNames) {
       try {
         await _openBox(boxName);
@@ -386,10 +372,44 @@ Future<({String message, bool success})> restoreData(
         );
       }
     }
+  }
+}
 
-    return (message: '${context.l10n!.restoredSuccess}!', success: true);
-  } catch (e, stackTrace) {
-    logger.log('Restore error', error: e, stackTrace: stackTrace);
-    return (message: '${context.l10n!.restoreError}: $e', success: false);
+Future<Uint8List> _readPickedFile(PlatformFile file) async {
+  return file.readAsBytes();
+}
+
+Future<void> _validateHiveBytes(String boxName, Uint8List bytes) async {
+  final validationDirectory = await Directory.systemTemp.createTemp(
+    'musify_restore_',
+  );
+  try {
+    final validationFile = File('${validationDirectory.path}/$boxName.hive');
+    await validationFile.writeAsBytes(bytes, flush: true);
+    final box = await Hive.openBox(boxName, path: validationDirectory.path);
+    await box.close();
+  } finally {
+    await validationDirectory.delete(recursive: true);
+  }
+}
+
+Future<void> _replaceHiveFile(String targetPath, Uint8List bytes) async {
+  final targetFile = File(targetPath);
+  final temporaryFile = File('$targetPath.restore.tmp');
+  final backupFile = File('$targetPath.restore.bak');
+
+  await temporaryFile.writeAsBytes(bytes, flush: true);
+  if (await backupFile.exists()) await backupFile.delete();
+
+  try {
+    if (await targetFile.exists()) await targetFile.rename(backupFile.path);
+    await temporaryFile.rename(targetPath);
+    if (await backupFile.exists()) await backupFile.delete();
+  } catch (_) {
+    if (await temporaryFile.exists()) await temporaryFile.delete();
+    if (!await targetFile.exists() && await backupFile.exists()) {
+      await backupFile.rename(targetPath);
+    }
+    rethrow;
   }
 }

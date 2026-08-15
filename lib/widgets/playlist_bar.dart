@@ -22,8 +22,8 @@
 import 'dart:async';
 
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
-import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:musify/extensions/l10n.dart';
 import 'package:musify/services/artist_service.dart';
 import 'package:musify/services/common_services.dart';
@@ -539,9 +539,8 @@ class PlaylistBar extends StatelessWidget {
       }
 
       if (isArtist) {
-        final basePath = _routeBasePath(context);
         context.push(
-          '$basePath/artist/${Uri.encodeComponent(_resolvedPlaylistId!)}',
+          NavigationManager.artistPath(context, _resolvedPlaylistId!),
           extra: playlistData,
         );
         return;
@@ -549,20 +548,6 @@ class PlaylistBar extends StatelessWidget {
 
       context.push('/home/playlist/$_resolvedPlaylistId');
     };
-  }
-
-  String _routeBasePath(BuildContext context) {
-    try {
-      final currentPath = GoRouterState.of(context).uri.path;
-      if (currentPath.startsWith(NavigationManager.searchPath)) {
-        return NavigationManager.searchPath;
-      }
-      if (currentPath.startsWith(NavigationManager.libraryPath)) {
-        return NavigationManager.libraryPath;
-      }
-    } catch (_) {}
-
-    return NavigationManager.homePath;
   }
 
   Future<void> _handleAddPlaylistToPlaylist(BuildContext context) async {

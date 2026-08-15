@@ -21,9 +21,9 @@
 import 'dart:async';
 
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
-import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:musify/constants/app_constants.dart';
 import 'package:musify/database/radio_stations.db.dart';
 import 'package:musify/extensions/l10n.dart';
@@ -72,9 +72,8 @@ set searchHistory(List value) {
 }
 
 void reloadSearchHistoryFromStorage() {
-  searchHistoryNotifier.value = Hive.box(
-    'user',
-  ).get('searchHistory', defaultValue: []);
+  searchHistoryNotifier.value = Hive.box('user')
+      .get('searchHistory', defaultValue: []);
 }
 
 class _SearchPageState extends State<SearchPage> {
@@ -94,6 +93,7 @@ class _SearchPageState extends State<SearchPage> {
   List<String> _suggestionsList = [];
   Timer? _debounce;
   int _latestSuggestionRequest = 0;
+  int _latestSearchRequest = 0;
 
   Future<void> _submitSearch([String? query]) async {
     if (query != null) {
@@ -143,6 +143,7 @@ class _SearchPageState extends State<SearchPage> {
 
   Future<void> search() async {
     final query = _searchBar.text;
+    final requestId = ++_latestSearchRequest;
 
     if (query.isEmpty) {
       _songsSearchResult = [];
@@ -229,6 +230,8 @@ class _SearchPageState extends State<SearchPage> {
         getPlaylists(query: query, type: 'album'),
         getPlaylists(query: query, type: 'playlist'),
       ]);
+
+      if (!mounted || requestId != _latestSearchRequest) return;
 
       _songsSearchResult = results[0];
       _artistsSearchResult = results[1]
@@ -606,7 +609,7 @@ class _SearchPageState extends State<SearchPage> {
     if (_radioStationsSearchResult.isNotEmpty) {
       widgets.add(
         SectionTitle(
-          'Radio Stations',
+          context.l10n!.radioStations,
           primaryColor,
           icon: FluentIcons.speaker_2_24_filled,
         ),
@@ -635,7 +638,7 @@ class _SearchPageState extends State<SearchPage> {
                   genre: station.genre,
                 );
                 if (!success && context.mounted) {
-                  showToast(context, 'Failed to play radio station');
+                  showToast(context, context.l10n!.failedPlayingRadio);
                 }
               },
             ),

@@ -25,8 +25,8 @@ import 'dart:io';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:musify/extensions/l10n.dart';
 import 'package:musify/main.dart';
 import 'package:musify/services/common_services.dart';
@@ -292,6 +292,7 @@ class SongBar extends StatefulWidget {
     this.playlistId,
     this.onRenamed,
     this.rank,
+    this.playCount,
     this.barPadding,
     super.key,
   });
@@ -311,6 +312,11 @@ class SongBar extends StatefulWidget {
   final VoidCallback? onRenamed;
   final EdgeInsetsGeometry? barPadding;
   final int? rank;
+
+  /// Play count to show next to the artist, e.g. `1.2B`. Presentation only,
+  /// like [rank]: it belongs to where the song is listed, not to the song.
+  final String? playCount;
+
   @override
   State<SongBar> createState() => _SongBarState();
 }
@@ -336,8 +342,17 @@ class _SongBarState extends State<SongBar> {
     // Cache frequently accessed values
     _songTitle = widget.song['title'] ?? '';
     _songArtist = widget.song['artist']?.toString() ?? '';
-    _artworkPath = widget.song['artworkPath'];
-    _lowResImageUrl = widget.song['lowResImage']?.toString() ?? '';
+    _artworkPath = _firstNonEmptyString([
+      widget.song['artworkPath'],
+      widget.song['artWorkPath'],
+    ]);
+    _lowResImageUrl =
+        _firstNonEmptyString([
+          widget.song['lowResImage'],
+          widget.song['image'],
+          widget.song['highResImage'],
+        ]) ??
+        '';
     _ytid = widget.song['ytid'] ?? '';
 
     // Initialize ValueNotifiers only once
@@ -390,12 +405,12 @@ class _SongBarState extends State<SongBar> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final _plays = widget.showPlayTime
-        ? (widget.song['listeningCount'] is int)
-              ? widget.song['listeningCount'] as int
-              : int.tryParse(widget.song['listeningCount']?.toString() ?? '') ??
-                    0
-        : null;
+    // Either the local listening count, or a play count supplied by the
+    // caller. Never read off the song itself: the same map travels into the
+    // queue, where the artist page counter has no meaning.
+    final plays = widget.showPlayTime
+        ? _listeningCountLabel()
+        : widget.playCount;
 
     return Material(
       color: widget.backgroundColor ?? colorScheme.surfaceContainerLow,
@@ -435,7 +450,7 @@ class _SongBarState extends State<SongBar> {
                 child: _SongInfo(
                   title: _songTitle,
                   artist: _songArtist,
-                  plays: _plays,
+                  plays: plays,
                   colorScheme: colorScheme,
                 ),
               ),
@@ -458,6 +473,14 @@ class _SongBarState extends State<SongBar> {
         ),
       ),
     );
+  }
+
+  String? _listeningCountLabel() {
+    final count = widget.song['listeningCount'];
+    final plays = count is int
+        ? count
+        : int.tryParse(count?.toString() ?? '') ?? 0;
+    return plays > 0 ? '$plays' : null;
   }
 
   void _handleSongTap() {
@@ -575,7 +598,7 @@ class _SongInfo extends StatelessWidget {
 
   final String title;
   final String artist;
-  final int? plays;
+  final String? plays;
   final ColorScheme colorScheme;
 
   @override
@@ -606,7 +629,7 @@ class _SongInfo extends StatelessWidget {
                 ),
               ),
             ),
-            if (plays != null && plays! > 0) ...[
+            if (plays != null && plays!.isNotEmpty) ...[
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 4),
                 child: Text(
@@ -624,7 +647,7 @@ class _SongInfo extends StatelessWidget {
               ),
               const SizedBox(width: 3),
               Text(
-                '$plays',
+                plays!,
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
@@ -637,6 +660,14 @@ class _SongInfo extends StatelessWidget {
       ],
     );
   }
+}
+
+String? _firstNonEmptyString(Iterable<Object?> values) {
+  for (final value in values) {
+    final stringValue = value?.toString().trim();
+    if (stringValue != null && stringValue.isNotEmpty) return stringValue;
+  }
+  return null;
 }
 
 class _OfflineArtwork extends StatelessWidget {
@@ -665,7 +696,7 @@ class _OfflineArtwork extends StatelessWidget {
               height: size,
               fit: BoxFit.cover,
               errorBuilder: (_, __, ___) =>
-                  const NullArtworkWidget(iconSize: 30),
+                  NullArtworkWidget(iconSize: 30, size: size),
             ),
             Positioned(
               top: 3,
@@ -780,7 +811,7 @@ class _OnlineArtwork extends StatelessWidget {
               ),
             ),
             errorWidget: (context, url, error) =>
-                const NullArtworkWidget(iconSize: 30),
+                NullArtworkWidget(iconSize: 30, size: size),
           ),
           if (isDurationAvailable && !isOffline)
             Positioned(
