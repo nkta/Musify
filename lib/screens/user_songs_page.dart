@@ -33,9 +33,10 @@ import 'package:musify/utilities/playlist_utils.dart';
 import 'package:musify/utilities/song_filtering.dart';
 import 'package:musify/widgets/confirmation_dialog.dart';
 import 'package:musify/widgets/mini_player_bottom_space.dart';
-import 'package:musify/widgets/playlist_cube.dart';
+import 'package:musify/widgets/playlist_hero_artwork.dart';
 import 'package:musify/widgets/playlist_page/empty_playlist_state.dart';
 import 'package:musify/widgets/playlist_page/playlist_header.dart';
+import 'package:musify/widgets/playlist_page/playlist_sliver_app_bar.dart';
 import 'package:musify/widgets/playlist_page/search_bar_section.dart';
 import 'package:musify/widgets/song_bar.dart';
 import 'package:musify/widgets/sort_chips.dart';
@@ -86,7 +87,6 @@ class _UserSongsPageState extends State<UserSongsPage> {
     final isOfflineSongs = title == context.l10n!.offlineSongs;
 
     return Scaffold(
-      appBar: AppBar(title: offlineMode.value ? Text(title) : null),
       body: Padding(
         padding: commonSingleChildScrollViewPadding,
         child: ValueListenableBuilder(
@@ -121,6 +121,10 @@ class _UserSongsPageState extends State<UserSongsPage> {
   ) {
     return CustomScrollView(
       slivers: [
+        PlaylistSliverAppBar(
+          title: title,
+          artwork: _buildPlaylistImage(title, icon),
+        ),
         SliverToBoxAdapter(
           child: _buildHeaderSection(title, icon, songsLength, isOfflineSongs),
         ),
@@ -160,9 +164,9 @@ class _UserSongsPageState extends State<UserSongsPage> {
     return Column(
       children: [
         PlaylistHeader(
-          _buildPlaylistImage(title, icon),
-          title,
+          title: title,
           songsLength: songsLength,
+          showTitle: false,
         ),
         if (songsLength > 0) ...[
           Padding(
@@ -269,13 +273,7 @@ class _UserSongsPageState extends State<UserSongsPage> {
   }
 
   Widget _buildPlaylistImage(String title, IconData icon) {
-    final screenWidth = MediaQuery.sizeOf(context).width;
-    final isLandscape = screenWidth > MediaQuery.sizeOf(context).height;
-    return PlaylistCube(
-      {'title': title},
-      size: isLandscape ? 250 : screenWidth / commonPlaylistArtworkDivision,
-      cubeIcon: icon,
-    );
+    return PlaylistHeroArtwork({'title': title}, cubeIcon: icon);
   }
 
   Widget _buildClearRecentsButton(Color primaryColor) {

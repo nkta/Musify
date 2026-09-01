@@ -37,13 +37,14 @@ import 'package:musify/utilities/async_loader.dart';
 import 'package:musify/utilities/flutter_toast.dart';
 import 'package:musify/widgets/artist_shelf.dart';
 import 'package:musify/widgets/mini_player_bottom_space.dart';
-import 'package:musify/widgets/playlist_cube.dart';
+import 'package:musify/widgets/playlist_hero_artwork.dart';
 import 'package:musify/widgets/playlist_page/add_to_playlist_button.dart';
 import 'package:musify/widgets/playlist_page/download_button.dart';
 import 'package:musify/widgets/playlist_page/empty_playlist_state.dart';
 import 'package:musify/widgets/playlist_page/like_button.dart';
 import 'package:musify/widgets/playlist_page/playlist_action_buttons.dart';
 import 'package:musify/widgets/playlist_page/playlist_header.dart';
+import 'package:musify/widgets/playlist_page/playlist_sliver_app_bar.dart';
 import 'package:musify/widgets/section_header.dart';
 import 'package:musify/widgets/song_bar.dart';
 import 'package:musify/widgets/spinner.dart';
@@ -211,49 +212,62 @@ class _ArtistPageState extends State<ArtistPage> {
       loadingWidget: Scaffold(appBar: AppBar(), body: const Spinner()),
       emptyWidget: _buildNotFoundPage(),
       builder: (context, _) => Scaffold(
-        appBar: AppBar(),
-        body: SingleChildScrollView(
+        body: Padding(
           padding: commonSingleChildScrollViewPadding,
-          child: Column(
-            children: [
-              _buildHeaderSection(),
-              _buildTopSongsSection(),
+          child: CustomScrollView(
+            slivers: [
+              PlaylistSliverAppBar(
+                title: _artistTitle,
+                artwork: PlaylistHeroArtwork(
+                  _artist!,
+                  cubeIcon: FluentIcons.person_24_filled,
+                ),
+              ),
+              SliverToBoxAdapter(child: _buildHeaderSection()),
+              SliverToBoxAdapter(child: _buildTopSongsSection()),
+              SliverToBoxAdapter(child: _buildAllSongsButton()),
               if (_albums.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 24),
-                  child: ArtistShelf(
-                    title: context.l10n!.albums,
-                    icon: FluentIcons.cd_16_regular,
-                    items: _albums,
-                    subtitleOf: _releaseSubtitle,
-                    onTap: _openRelease,
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 24),
+                    child: ArtistShelf(
+                      title: context.l10n!.albums,
+                      icon: FluentIcons.cd_16_regular,
+                      items: _albums,
+                      subtitleOf: _releaseSubtitle,
+                      onTap: _openRelease,
+                    ),
                   ),
                 ),
               if (_singles.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 24),
-                  child: ArtistShelf(
-                    title: context.l10n!.singlesAndEps,
-                    icon: FluentIcons.music_note_2_24_regular,
-                    items: _singles,
-                    subtitleOf: _releaseSubtitle,
-                    onTap: _openRelease,
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 24),
+                    child: ArtistShelf(
+                      title: context.l10n!.singlesAndEps,
+                      icon: FluentIcons.music_note_2_24_regular,
+                      items: _singles,
+                      subtitleOf: _releaseSubtitle,
+                      onTap: _openRelease,
+                    ),
                   ),
                 ),
               if (_relatedArtists.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 24),
-                  child: ArtistShelf(
-                    title: context.l10n!.suggestedArtists,
-                    icon: FluentIcons.person_24_regular,
-                    items: _relatedArtists,
-                    cubeIcon: FluentIcons.person_24_filled,
-                    circular: true,
-                    onTap: _openArtist,
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 24),
+                    child: ArtistShelf(
+                      title: context.l10n!.suggestedArtists,
+                      icon: FluentIcons.person_24_regular,
+                      items: _relatedArtists,
+                      cubeIcon: FluentIcons.person_24_filled,
+                      circular: true,
+                      onTap: _openArtist,
+                    ),
                   ),
                 ),
-              const SizedBox(height: 16),
-              const MiniPlayerBottomSpace(),
+              const SliverToBoxAdapter(child: SizedBox(height: 16)),
+              const SliverToBoxAdapter(child: MiniPlayerBottomSpace()),
             ],
           ),
         ),
@@ -292,22 +306,12 @@ class _ArtistPageState extends State<ArtistPage> {
   }
 
   Widget _buildHeaderSection() {
-    final screenSize = MediaQuery.sizeOf(context);
-    final isLandscape = screenSize.width > screenSize.height;
-
     return Column(
       children: [
         PlaylistHeader(
-          PlaylistCube(
-            _artist!,
-            size: isLandscape
-                ? 250
-                : screenSize.width / commonPlaylistArtworkDivision,
-            cubeIcon: FluentIcons.person_24_filled,
-            showTypeLabel: false,
-          ),
-          _artistTitle,
+          title: _artistTitle,
           isArtist: true,
+          showTitle: false,
           monthlyListeners: _artist!['monthlyListeners']?.toString(),
           description: _artist!['description']?.toString(),
         ),
@@ -384,6 +388,28 @@ class _ArtistPageState extends State<ArtistPage> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildAllSongsButton() {
+    return Padding(
+      // Align with header action buttons
+      padding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
+      child: SizedBox(
+        width: double.infinity,
+        child: FilledButton.tonalIcon(
+          icon: const Icon(FluentIcons.arrow_right_24_regular),
+          iconAlignment: IconAlignment.end,
+          label: Text(context.l10n!.allSongs),
+          style: FilledButton.styleFrom(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+          ),
+          onPressed: () => context.push(
+            NavigationManager.artistSongsPath(context, _resolvedArtistId),
+            extra: artistPlaylistData(_artist!),
+          ),
+        ),
+      ),
     );
   }
 
