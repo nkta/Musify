@@ -130,8 +130,16 @@ class _NowPlayingPageState extends State<NowPlayingPage> {
                 ),
               ),
               onPressed: () {
+                // A live stream has no meaningful timestamp to resume from.
+                final isLive = metadata.extras?['isLive'] ?? false;
+                final position = isLive
+                    ? Duration.zero
+                    : audioHandler.sourcePosition;
+                final query = position > Duration.zero
+                    ? '?v=$ytid&t=${position.inSeconds}s'
+                    : '?v=$ytid';
                 unawaited(
-                  launchURL(Uri.parse('https://www.youtube.com/watch?v=$ytid')),
+                  launchURL(Uri.parse('https://www.youtube.com/watch$query')),
                 );
               },
             ),

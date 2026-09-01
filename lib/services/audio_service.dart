@@ -2477,10 +2477,18 @@ class MusifyAudioHandler extends BaseAudioHandler {
         return fileSource;
       }
 
+      final isLive = song['isLive'] ?? false;
       final uri = Uri.parse(songUrl);
-      final audioSource = AudioSource.uri(uri, tag: tag);
+      final Map<String, String>? headers = isLive
+          ? {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+              'Referer': 'https://www.youtube.com/',
+              'Origin': 'https://www.youtube.com',
+            }
+          : null;
+      final audioSource = AudioSource.uri(uri, headers: headers, tag: tag);
 
-      if (!sponsorBlockSupport.value) {
+      if (isLive || !sponsorBlockSupport.value) {
         return audioSource;
       }
 
@@ -2563,6 +2571,20 @@ class MusifyAudioHandler extends BaseAudioHandler {
     if (children.length == 1) return children.first;
     // ignore: deprecated_member_use
     return ConcatenatingAudioSource(children: children);
+  }
+
+  /// The current position inside the original source, i.e. the timeline of the
+  /// YouTube video itself.
+  ///
+  /// [AudioPlayer.position] is relative to the source being played, so as soon
+  /// as SponsorBlock clips segments out it drifts from the video's own
+  /// timeline: it restarts from zero on every clip. Adding the clip's start
+  /// offset back gives a position that can be handed to YouTube.
+  Duration get sourcePosition {
+    final position = audioPlayer.position;
+    final currentSource = audioPlayer.sequenceState.currentSource;
+    if (currentSource is! ClippingAudioSource) return position;
+    return (currentSource.start ?? Duration.zero) + position;
   }
 
   Future<void> skipToSong(int newIndex) async {
