@@ -63,7 +63,7 @@ final ValueNotifier<List> searchHistoryNotifier = ValueNotifier<List>(
   Hive.box('user').get('searchHistory', defaultValue: []),
 );
 
-enum SearchResultFilter { songs, playlists }
+enum SearchResultFilter { songs, playlists, lives }
 
 // Backward compatibility - keep the global variable for existing code
 List get searchHistory => searchHistoryNotifier.value;
@@ -83,10 +83,12 @@ class _SearchPageState extends State<SearchPage> {
   final Set<SearchResultFilter> _activeFilters = {
     SearchResultFilter.songs,
     SearchResultFilter.playlists,
+    SearchResultFilter.lives,
   };
   int maxSongsInList = 15;
   List<dynamic> _songsSearchResult = [];
   List<Map<String, dynamic>> _artistsSearchResult = [];
+  List<dynamic> _livesSearchResult = [];
   List<dynamic> _albumsSearchResult = [];
   List<dynamic> _playlistsSearchResult = [];
   List<RadioStation> _radioStationsSearchResult = [];
@@ -133,8 +135,11 @@ class _SearchPageState extends State<SearchPage> {
   void _clearSearch() {
     _searchBar.clear();
     _songsSearchResult = [];
+    _artistsSearchResult = [];
+    _livesSearchResult = [];
     _albumsSearchResult = [];
     _playlistsSearchResult = [];
+    _radioStationsSearchResult = [];
     _suggestionsList = [];
     if (mounted) {
       setState(() {});
@@ -148,6 +153,7 @@ class _SearchPageState extends State<SearchPage> {
     if (query.isEmpty) {
       _songsSearchResult = [];
       _artistsSearchResult = [];
+      _livesSearchResult = [];
       _albumsSearchResult = [];
       _playlistsSearchResult = [];
       _radioStationsSearchResult = [];
@@ -158,7 +164,7 @@ class _SearchPageState extends State<SearchPage> {
     _fetchingSongs.value = true;
 
     final youtubeVideoUrlRegex = RegExp(
-      r'(?:https?:\/\/)?(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})',
+      r'(?:https?:\/\/)?(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?v=|embed\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})',
     );
     final youtubePlaylistUrlRegex = RegExp(
       r'(?:https?:\/\/)?(?:www\.)?youtube\.com\/playlist\?list=([a-zA-Z0-9_-]+)',
@@ -227,6 +233,7 @@ class _SearchPageState extends State<SearchPage> {
       final results = await Future.wait<List<dynamic>>([
         fetchSongsList(query),
         searchArtists(query),
+        fetchLivesList(query),
         getPlaylists(query: query, type: 'album'),
         getPlaylists(query: query, type: 'playlist'),
       ]);
@@ -241,8 +248,9 @@ class _SearchPageState extends State<SearchPage> {
       if (_songsSearchResult.isEmpty && _artistsSearchResult.isNotEmpty) {
         _songsSearchResult = await _fetchSongsForResolvedArtist(query);
       }
-      _albumsSearchResult = results[2];
-      _playlistsSearchResult = results[3];
+      _livesSearchResult = results[2];
+      _albumsSearchResult = results[3];
+      _playlistsSearchResult = results[4];
 
       // Filter radio stations by name or genre
       _radioStationsSearchResult = radioStationsDB
@@ -290,11 +298,13 @@ class _SearchPageState extends State<SearchPage> {
     final primaryColor = Theme.of(context).colorScheme.primary;
     final showSongs = _activeFilters.contains(SearchResultFilter.songs);
     final showPlaylists = _activeFilters.contains(SearchResultFilter.playlists);
+    final showLives = _activeFilters.contains(SearchResultFilter.lives);
     final hasSongsResults = showSongs && _songsSearchResult.isNotEmpty;
+    final hasLivesResults = showLives && _livesSearchResult.isNotEmpty;
     final hasAlbumResults = showPlaylists && _albumsSearchResult.isNotEmpty;
     final hasPlaylistResults = showPlaylists && _playlistsSearchResult.isNotEmpty;
     final hasAnyResults =
-        hasSongsResults || hasAlbumResults || hasPlaylistResults;
+        hasSongsResults || hasLivesResults || hasAlbumResults || hasPlaylistResults;
 
     return Scaffold(
       appBar: AppBar(title: Text(context.l10n!.search)),
@@ -458,6 +468,7 @@ class _SearchPageState extends State<SearchPage> {
                       primaryColor,
                       showSongs: showSongs,
                       showPlaylists: showPlaylists,
+                      showLives: showLives,
                     ),
             ),
             const MiniPlayerBottomSpace(),
@@ -472,6 +483,7 @@ class _SearchPageState extends State<SearchPage> {
     Color primaryColor, {
     required bool showSongs,
     required bool showPlaylists,
+    required bool showLives,
   }) {
     final widgets = <Widget>[];
 
@@ -504,6 +516,34 @@ class _SearchPageState extends State<SearchPage> {
                 extra: artist,
               );
             },
+          ),
+        );
+      }
+    }
+
+    // Lives section
+    if (showLives && _livesSearchResult.isNotEmpty) {
+      widgets.add(
+        SectionTitle(
+          Localizations.localeOf(context).languageCode == 'fr' ? 'En direct' : 'Live',
+          primaryColor,
+          icon: FluentIcons.live_24_filled,
+        ),
+      );
+
+      final livesCount = _livesSearchResult.length > maxSongsInList
+          ? maxSongsInList
+          : _livesSearchResult.length;
+
+      for (var index = 0; index < livesCount; index++) {
+        final borderRadius = getItemBorderRadius(index, livesCount);
+        widgets.add(
+          SongBar(
+            _livesSearchResult[index],
+            true,
+            key: listItemKey('search_live', index, _livesSearchResult[index]),
+            showMusicDuration: false,
+            borderRadius: borderRadius,
           ),
         );
       }
@@ -649,7 +689,7 @@ class _SearchPageState extends State<SearchPage> {
 
     return Column(
       key: ValueKey(
-        'results-${_songsSearchResult.length}-${_artistsSearchResult.length}-${_albumsSearchResult.length}-${_playlistsSearchResult.length}',
+        'results-${_songsSearchResult.length}-${_artistsSearchResult.length}-${_livesSearchResult.length}-${_albumsSearchResult.length}-${_playlistsSearchResult.length}',
       ),
       children: widgets,
     );
@@ -661,6 +701,10 @@ class _SearchPageState extends State<SearchPage> {
         return context.l10n!.songs;
       case SearchResultFilter.playlists:
         return context.l10n!.playlists;
+      case SearchResultFilter.lives:
+        return Localizations.localeOf(context).languageCode == 'fr'
+            ? 'En direct'
+            : 'Live';
     }
   }
 

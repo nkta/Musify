@@ -150,6 +150,23 @@ Future<List> fetchSongsList(String searchQuery) async {
   }
 }
 
+Future<List> fetchLivesList(String searchQuery) async {
+  try {
+    final List<Video> searchResults = await ytClient.search.search(
+      searchQuery,
+      filter: FeatureFilters.live,
+    );
+    final livesList = searchResults
+        .map((video) => returnSongLayout(0, video))
+        .toList();
+
+    return livesList;
+  } catch (e, stackTrace) {
+    logger.log('Error in fetchLivesList', error: e, stackTrace: stackTrace);
+    return [];
+  }
+}
+
 Future<List> getRecommendedSongs() async {
   try {
     if (externalRecommendations.value && userRecentlyPlayed.value.isNotEmpty) {

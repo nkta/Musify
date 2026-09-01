@@ -145,6 +145,35 @@ class _InitialData extends InitialData {
     return '';
   }
 
+  // Live status must not be inferred from `viewCountText` ("N watching"):
+  // that label is localized by YouTube (e.g. French renders it as
+  // "utilisateurs regardent la vidéo"), so a hardcoded English match silently
+  // returns false for non-English locales. The `LIVE_NOW` badge style is a
+  // structural marker YouTube sends regardless of locale.
+  bool _isLiveNow(JsonMap renderer) {
+    final badges = renderer.getJson<List<dynamic>>('badges') ?? const [];
+
+    for (final badge in badges) {
+      if (badge is! JsonMap) {
+        continue;
+      }
+
+      final metadata = badge.getJson<JsonMap>('metadataBadgeRenderer');
+      if (metadata == null) {
+        continue;
+      }
+
+      final style = metadata.getT<String>('style') ?? '';
+      final iconType = metadata.getJson<String>('icon/iconType') ?? '';
+
+      if (style.contains('LIVE_NOW') || iconType == 'LIVE') {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   bool _hasVerifiedArtistBadge(JsonMap renderer) {
     final badges = <dynamic>[
       ...?renderer.getJson<List<dynamic>>('ownerBadges'),
@@ -247,12 +276,7 @@ class _InitialData extends InitialData {
               )
               .toList(),
           renderer.getJson<String>('publishedTimeText/simpleText'),
-          renderer
-                  .getJson<List<dynamic>>('viewCountText/runs')
-                  ?.elementAtSafe(1)
-                  ?.getT<String>('text')
-                  ?.trim() ==
-              'watching',
+          _isLiveNow(renderer),
           _getChannelId(renderer));
     }
 
