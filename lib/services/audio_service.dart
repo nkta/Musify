@@ -1879,6 +1879,37 @@ class MusifyAudioHandler extends BaseAudioHandler {
   final Map<String, BehaviorSubject<Map<String, dynamic>>> _childrenSubjects =
       {};
 
+  void _notifyChildrenChanged(List<String> parentMediaIds) {
+    for (final parentMediaId in parentMediaIds) {
+      final subject = _childrenSubjects[parentMediaId];
+      if (subject != null && !subject.isClosed) {
+        subject.add(<String, dynamic>{});
+      }
+    }
+  }
+
+  void _setupMediaBrowserSubscriptions() {
+    void watch(Listenable source, List<String> parents) {
+      source.addListener(() => _notifyChildrenChanged(parents));
+    }
+
+    watch(userLikedSongsList, const [_rootLiked]);
+    watch(userOfflineSongs, const [_rootOffline]);
+    watch(userRecentlyPlayed, const [_rootRecent, AudioService.recentRootId]);
+    watch(userCustomPlaylists, const [_rootPlaylists]);
+    watch(userLikedPlaylists, const [_rootPlaylists]);
+    watch(userPlaylistFolders, const [_rootPlaylists]);
+
+    queue
+        .throttleTime(const Duration(seconds: 2), trailing: true)
+        .listen(
+          (_) => _notifyChildrenChanged(const [_rootQueue]),
+          onError: (Object error, StackTrace stackTrace) {
+            _logStreamError('Queue browse stream error', error, stackTrace);
+          },
+        );
+  }
+
   String _songMediaId(String containerId, String token) =>
       '$_songMediaIdPrefix$containerId:$token';
 
