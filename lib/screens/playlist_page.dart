@@ -30,12 +30,14 @@ import 'package:musify/constants/app_constants.dart';
 import 'package:musify/extensions/l10n.dart';
 import 'package:musify/main.dart';
 import 'package:musify/services/artist_service.dart';
+import 'package:musify/services/common_services.dart';
 import 'package:musify/services/data_manager.dart';
 import 'package:musify/services/playlist_download_service.dart';
 import 'package:musify/services/playlist_sharing.dart';
 import 'package:musify/services/playlists_manager.dart';
 import 'package:musify/services/settings_manager.dart';
 import 'package:musify/utilities/app_utils.dart';
+import 'package:musify/utilities/async_loader.dart';
 import 'package:musify/utilities/flutter_toast.dart';
 import 'package:musify/utilities/playlist_utils.dart';
 import 'package:musify/utilities/song_filtering.dart';
@@ -51,6 +53,7 @@ import 'package:musify/widgets/playlist_page/playlist_action_buttons.dart';
 import 'package:musify/widgets/playlist_page/playlist_header.dart';
 import 'package:musify/widgets/playlist_page/playlist_sliver_app_bar.dart';
 import 'package:musify/widgets/playlist_page/search_bar_section.dart';
+import 'package:musify/widgets/recommended_songs_section.dart';
 import 'package:musify/widgets/song_bar.dart';
 import 'package:musify/widgets/sort_chips.dart';
 import 'package:musify/widgets/spinner.dart';
@@ -80,6 +83,15 @@ class _PlaylistPageState extends State<PlaylistPage> {
   late List<dynamic> _originalPlaylistList; // Keep original order separately
 
   bool _isInitializingPlaylist = true;
+
+  /// Playlist-seeded recommendations for eligible online custom playlists.
+  Future<List>? _recommendedSongsFuture;
+
+  /// Ytids added during this visit, removed from the fetched recommendations immediately.
+  final Set<String> _addedRecommendedSongIds = {};
+
+  /// Maximum recommendations rendered at once to bound artwork loads per frame.
+  static const _visibleRecommendedSongsCount = 5;
 
   String? get _resolvedPlaylistId =>
       _playlist?['ytid']?.toString() ??
@@ -161,6 +173,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
         _adoptPlaylist(_playlist);
         _sortPlaylist(_sortType);
       }
+      _maybeLoadRecommendations();
     } catch (e, stackTrace) {
       logger.log(
         'Error initializing playlist:',
@@ -180,9 +193,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
 
   @override
   Widget build(BuildContext context) {
-    final showPlaylist = !_isInitializingPlaylist && _playlist != null;
     return Scaffold(
-      appBar: showPlaylist ? null : _buildAppBar(context),
       body: Padding(
         padding: commonSingleChildScrollViewPadding,
         child: _isInitializingPlaylist
@@ -196,7 +207,10 @@ class _PlaylistPageState extends State<PlaylistPage> {
                   PlaylistSliverAppBar(
                     leading: _buildBackButton(context),
                     title: _playlistTitle,
-                    artwork: _buildPlaylistHeroArtwork(),
+                    artwork: PlaylistHeroArtwork(
+                      _playlist,
+                      cubeIcon: widget.cubeIcon,
+                    ),
                   ),
                   SliverToBoxAdapter(child: _buildHeaderSection()),
                   if ((_playlist['list'] as List? ?? const []).isNotEmpty) ...[
@@ -228,6 +242,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
                     EmptyPlaylistState(
                       message: context.l10n!.noSongsInPlaylist,
                     ),
+                  _buildRecommendedSongsSliver(),
                   const SliverMiniPlayerBottomSpace(),
                 ],
               )
@@ -236,8 +251,59 @@ class _PlaylistPageState extends State<PlaylistPage> {
     );
   }
 
-  PreferredSizeWidget _buildAppBar(BuildContext context) {
-    return AppBar(leading: _buildBackButton(context));
+  Widget _buildRecommendedSongsSliver() {
+    final future = _recommendedSongsFuture;
+    if (future == null) return const SliverToBoxAdapter();
+
+    return SliverToBoxAdapter(
+      child: AsyncLoader<List<dynamic>>(
+        future: future,
+        // Keep the section hidden when recommendations fail or are empty.
+        loadingWidget: const SizedBox.shrink(),
+        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+        builder: (context, data) {
+          // Cap rendered rows to limit simultaneous artwork loads; do not refetch or backfill.
+          final visibleSongs = data
+              .where(
+                (song) =>
+                    !_addedRecommendedSongIds.contains(
+                      song['ytid']?.toString(),
+                    ),
+              )
+              .take(_visibleRecommendedSongsCount)
+              .toList();
+          if (visibleSongs.isEmpty) return const SizedBox.shrink();
+
+          return Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: RecommendedSongsSection(
+              title: context.l10n!.recommendedSongs,
+              songs: visibleSongs,
+              listKeyPrefix: 'playlist_recommended',
+              onAddSong: _handleAddRecommendedSong,
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  /// Adds a recommendation directly to the current playlist with one tap.
+  void _handleAddRecommendedSong(Map song) {
+    final playlistId = _resolvedPlaylistId;
+    if (playlistId == null) return;
+
+    final result = addSongInCustomPlaylist(context, playlistId, song);
+    showToast(context, result);
+
+    if (result == context.l10n!.songAdded) {
+      setState(() {
+        _addedRecommendedSongIds.add(song['ytid']?.toString() ?? '');
+        _originalPlaylistList.add(song);
+        _playlist['list'] = List<dynamic>.from(_originalPlaylistList);
+        _sortPlaylist(_sortType);
+      });
+    }
   }
 
   Widget _buildBackButton(BuildContext context) {
@@ -251,10 +317,6 @@ class _PlaylistPageState extends State<PlaylistPage> {
   String get _playlistTitle => widget.isArtist
       ? normalizeArtistDisplayTitle(_playlist['title']?.toString() ?? '')
       : _playlist['title']?.toString() ?? '';
-
-  Widget _buildPlaylistHeroArtwork() {
-    return PlaylistHeroArtwork(_playlist, cubeIcon: widget.cubeIcon);
-  }
 
   Widget _buildHeaderSection() {
     final songsLength = (_playlist['list'] as List? ?? const []).length;
@@ -525,6 +587,12 @@ class _PlaylistPageState extends State<PlaylistPage> {
   }
 
   void _updateSongsListOnRemove(int indexOfRemovedSong, dynamic songToRemove) {
+    final originalIndex = _originalPlaylistList.indexWhere(
+      (song) => song is Map && song['ytid'] == songToRemove['ytid'],
+    );
+    final indexToRestore = originalIndex == -1
+        ? indexOfRemovedSong
+        : originalIndex;
     _originalPlaylistList.removeWhere((s) => s['ytid'] == songToRemove['ytid']);
     final playlistId = _playlist['ytid'];
     if (mounted) {
@@ -538,17 +606,18 @@ class _PlaylistPageState extends State<PlaylistPage> {
             context,
             playlistId,
             songToRemove,
-            indexToInsert: indexOfRemovedSong,
+            indexToInsert: indexToRestore,
           );
           if (result == context.l10n!.songAdded &&
               !_originalPlaylistList.any(
                 (song) => song['ytid'] == songToRemove['ytid'],
               )) {
-            final safeIndex = indexOfRemovedSong.clamp(
+            final safeIndex = indexToRestore.clamp(
               0,
               _originalPlaylistList.length,
             );
             _originalPlaylistList.insert(safeIndex, songToRemove);
+            _playlist['list'] = List<dynamic>.from(_originalPlaylistList);
             _sortPlaylist(_sortType);
           }
           if (mounted) setState(() {});
@@ -571,6 +640,25 @@ class _PlaylistPageState extends State<PlaylistPage> {
         return context.l10n!.artist;
       case PlaylistSortType.dateAdded:
         return context.l10n!.dateAdded;
+    }
+  }
+
+  /// Loads recommendations only for non-empty online user-created playlists.
+  void _maybeLoadRecommendations() {
+    final isUserCreated = _playlist?['source'] == 'user-created';
+    final songs = _playlist?['list'] as List? ?? const [];
+    final playlistId = _resolvedPlaylistId;
+
+    if (isUserCreated &&
+        !offlineMode.value &&
+        songs.isNotEmpty &&
+        playlistId != null) {
+      _recommendedSongsFuture = getRecommendedSongsForPlaylist(
+        playlistId,
+        songs,
+      );
+    } else {
+      _recommendedSongsFuture = null;
     }
   }
 

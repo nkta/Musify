@@ -46,6 +46,7 @@ import 'package:musify/widgets/confirmation_dialog.dart';
 import 'package:musify/widgets/custom_bar.dart';
 import 'package:musify/widgets/mini_player_bottom_space.dart';
 import 'package:musify/widgets/section_header.dart';
+import 'package:musify/widgets/shapes/four_sided_cookie_shape.dart';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
@@ -479,14 +480,10 @@ class SettingsPage extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
               child: Row(
                 children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: colorScheme.onPrimaryContainer.withValues(
-                        alpha: 0.14,
-                      ),
-                      shape: BoxShape.circle,
+                  FourSidedCookieShape(
+                    size: 44,
+                    color: colorScheme.onPrimaryContainer.withValues(
+                      alpha: 0.14,
                     ),
                     child: Icon(
                       FluentIcons.heart_24_filled,
