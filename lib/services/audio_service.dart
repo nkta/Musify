@@ -35,6 +35,7 @@ import 'package:musify/services/audio_service_android_auto.dart';
 import 'package:musify/services/common_services.dart';
 import 'package:musify/services/data_manager.dart';
 import 'package:musify/services/listening_stats_service.dart';
+import 'package:musify/services/playlists_manager.dart';
 import 'package:musify/services/settings_manager.dart';
 import 'package:musify/utilities/map_utils.dart';
 import 'package:musify/utilities/media_duration.dart';
@@ -126,8 +127,6 @@ class MusifyAudioHandler extends BaseAudioHandler implements AndroidAutoHost {
   static const String _lastPlaybackStorageKey = 'lastPlaybackState';
   static const Duration _positionDataThreshold = Duration(milliseconds: 250);
   static const Duration _playbackStateHeartbeat = Duration(seconds: 1);
-
-  static const String _recentMediaIdPrefix = 'recent:';
 
   StreamSubscription<Duration>? _positionTrackingSubscription;
   DateTime _lastPersistedAt = DateTime.fromMillisecondsSinceEpoch(0);
