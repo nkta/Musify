@@ -37,6 +37,7 @@ import 'package:musify/services/proxy_manager.dart';
 import 'package:musify/services/settings_manager.dart';
 import 'package:musify/utilities/app_utils.dart';
 import 'package:musify/utilities/formatter.dart';
+import 'package:musify/utilities/map_utils.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 List globalSongs = [];
@@ -71,12 +72,8 @@ Set<String> _createSongIdCache(ValueNotifier<List> source) {
   return cache;
 }
 
-Set<String> _songIds(Iterable songs) => songs
-    .whereType<Map>()
-    .map((song) => song['ytid']?.toString())
-    .whereType<String>()
-    .where((ytid) => ytid.isNotEmpty)
-    .toSet();
+Set<String> _songIds(Iterable songs) =>
+    songs.whereType<Map>().map(songYtid).whereType<String>().toSet();
 
 final _cachedLikedSongIds = _createSongIdCache(userLikedSongsList);
 final _cachedOfflineSongIds = _createSongIdCache(userOfflineSongs);
@@ -107,13 +104,12 @@ Future<StreamManifest?> _fetchStreamManifest(String songId) async {
     return ProxyManager().getSongManifest(songId).timeout(_manifestTimeout);
   }
 
-  return ytClient.videos.streams
-      .getManifest(songId, ytClients: customClients)
-      .timeout(_manifestTimeout);
+  return getManifestWithFallback(ytClient, songId, timeout: _manifestTimeout);
 }
 
 /// Returns a cached song URL if present and still valid.
 Future<String?> _getCachedSongUrl(
+  String songId,
   String cacheKey,
   Duration cacheDuration,
 ) async {
@@ -137,7 +133,7 @@ Future<String?> _getCachedSongUrl(
     return cachedUrl;
   }
 
-  if (await _validateCachedUrl(cachedUrl)) {
+  if (await _validateCachedUrl(songId, cachedUrl)) {
     return cachedUrl;
   }
 
@@ -147,9 +143,12 @@ Future<String?> _getCachedSongUrl(
 }
 
 /// Checks if a cached URL still responds successfully.
-Future<bool> _validateCachedUrl(String cachedUrl) async {
+Future<bool> _validateCachedUrl(String songId, String cachedUrl) async {
   try {
-    final response = await http.head(Uri.parse(cachedUrl));
+    final response = await http.head(
+      Uri.parse(cachedUrl),
+      headers: streamPlaybackHeaders(songId),
+    );
     return response.statusCode >= 200 && response.statusCode < 300;
   } catch (_) {
     return false;
@@ -321,42 +320,25 @@ List<Map> _sampleSeedSongs(List songs, int count) {
 }
 
 Future<List> _getRecommendationsFromMixedSources() async {
-  final playlistSongs = [
-    ...userLikedSongsList.value,
-    ...userRecentlyPlayed.value,
+  final recommendationSources = <Iterable<dynamic>>[
+    userLikedSongsList.value,
+    userRecentlyPlayed.value,
   ];
 
   if (globalSongs.isEmpty) {
     const playlistId = 'PLgzTt0k8mXzEk586ze4BjvDXR7c-TUSnx';
     globalSongs = await getSongsFromPlaylist(playlistId);
   }
-  playlistSongs.addAll(globalSongs.take(10));
+  recommendationSources.add(globalSongs.take(10));
 
   if (userCustomPlaylists.value.isNotEmpty) {
     for (final userPlaylist in userCustomPlaylists.value) {
-      final _list = List.from(userPlaylist['list'] as List)..shuffle();
-      playlistSongs.addAll(_list.take(5));
+      final playlistSongs = userPlaylist['list'] as List;
+      recommendationSources.add(_sampleSeedSongs(playlistSongs, 5));
     }
   }
 
-  return _deduplicateAndShuffle(playlistSongs);
-}
-
-List _deduplicateAndShuffle(List playlistSongs) {
-  final seenYtIds = <String>{};
-  final uniqueSongs = <Map>[];
-
-  playlistSongs.shuffle();
-
-  for (final song in playlistSongs) {
-    if (song['ytid'] != null && seenYtIds.add(song['ytid'])) {
-      uniqueSongs.add(song);
-      // Early exit when we have enough songs
-      if (uniqueSongs.length >= 15) break;
-    }
-  }
-
-  return uniqueSongs;
+  return sampleUniqueSongs(recommendationSources, 15);
 }
 
 Future<void> updateSongLikeStatus(
@@ -415,18 +397,10 @@ Future<Map?> _resolveSongForLikedStatus(String songId, Map? songData) async {
     return Map<String, dynamic>.from(songData!);
   }
 
-  final cachedSong = _findSongById(userLikedSongsList.value, songId);
+  final cachedSong = findSongByYtid(userLikedSongsList.value, songId);
   if (cachedSong != null) return Map<String, dynamic>.from(cachedSong);
 
   return getSongDetails(userLikedSongsList.value.length, songId);
-}
-
-Map? _findSongById(Iterable<dynamic> songs, String songId) {
-  for (final song in songs) {
-    if (song is Map && song['ytid']?.toString() == songId) return song;
-  }
-
-  return null;
 }
 
 List _deduplicateLikedSongs(Iterable<dynamic> likedSongs) {
@@ -784,7 +758,7 @@ Future<String?> fetchSongStreamUrl(String songId, bool isLive) async {
     final cacheKey = 'song_${songId}_${audioQualitySetting.value}_url';
 
     // Try to get from cache
-    final cachedUrl = await _getCachedSongUrl(cacheKey, _cacheDuration);
+    final cachedUrl = await _getCachedSongUrl(songId, cacheKey, _cacheDuration);
     if (cachedUrl != null) {
       return cachedUrl;
     }
@@ -973,28 +947,29 @@ Future<bool> makeSongOffline(dynamic song) async {
   }
 }
 
+Future<void> _deleteFileIfExists(File file, String errorDescription) async {
+  try {
+    if (await file.exists()) {
+      await file.delete(recursive: true);
+    }
+  } catch (e, stackTrace) {
+    logger.log(
+      'Error deleting $errorDescription',
+      error: e,
+      stackTrace: stackTrace,
+    );
+  }
+}
+
 Future<bool> removeSongFromOffline(dynamic songId) async {
   try {
     final audioPath = FilePaths.getAudioPath(songId);
-    final audioFile = File(audioPath);
     final artworkPath = FilePaths.getArtworkPath(songId);
-    final artworkFile = File(artworkPath);
 
-    try {
-      if (await audioFile.exists()) await audioFile.delete(recursive: true);
-    } catch (e, stackTrace) {
-      logger.log('Error deleting audio file', error: e, stackTrace: stackTrace);
-    }
-
-    try {
-      if (await artworkFile.exists()) await artworkFile.delete(recursive: true);
-    } catch (e, stackTrace) {
-      logger.log(
-        'Error deleting artwork file',
-        error: e,
-        stackTrace: stackTrace,
-      );
-    }
+    await Future.wait([
+      _deleteFileIfExists(File(audioPath), 'audio file'),
+      _deleteFileIfExists(File(artworkPath), 'artwork file'),
+    ]);
 
     try {
       userOfflineSongs.value = List.from(userOfflineSongs.value)
